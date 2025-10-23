@@ -1,0 +1,32 @@
+{
+  "name": "yantra-language-server",
+  "displayName": "Yantra Language Server",
+  "description": "Language Server Protocol (LSP) implementation for the Yantra grammar language",
+  "version": "0.0.1",
+  "publisher": "your-publisher-id",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./client/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "yantra",
+        "aliases": ["Yantra"],
+        "extensions": [".y", ".yantra"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "yantra",
+        "scopeName": "source.yantra",
+        "path": "./syntaxes/yantra.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {},
+  "dependencies": {},
+  "devDependencies": {}
+}
