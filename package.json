@@ -9,12 +9,18 @@
     "vscode": "^1.80.0"
   },
   "main": "./client/extension.js",
+  "type": "module",
   "contributes": {
     "languages": [
       {
         "id": "yantra",
-        "aliases": ["Yantra"],
-        "extensions": [".y", ".yantra"],
+        "aliases": [
+          "Yantra"
+        ],
+        "extensions": [
+          ".y",
+          ".yantra"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -27,6 +33,9 @@
     ]
   },
   "scripts": {},
-  "dependencies": {},
-  "devDependencies": {}
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
+  }
 }
