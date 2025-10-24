@@ -3,22 +3,27 @@ import {
   TextDocuments,
   DiagnosticSeverity,
   ProposedFeatures,
+  Location,
+  Range,
+  URI,
 } from 'vscode-languageserver/node.js';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
-import { YantraParser } from './YantraParser.js';
+import { ParserStatus, YantraParser } from './YantraParser.js';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 
 // Per-document parser cache
+/** @type {Map<URI, YantraParser} */
 const parserCache = new Map();
 
 connection.onInitialize(() => {
   return {
     capabilities: {
       textDocumentSync: documents.syncKind,
+      definitionProvider: true
     },
   };
 });
@@ -52,7 +57,7 @@ function updateDiagnostics(document) {
   const text = document.getText();
   documentParser.parse(text);
 
-  const diagnostics = documentParser.errors().map((yantraerror) => {
+  const diagnostics = documentParser.errors.map((yantraerror) => {
     return {
       severity: yantraerror.severity,
       range: yantraerror.range,
@@ -63,6 +68,27 @@ function updateDiagnostics(document) {
 
   connection.sendDiagnostics({ uri: document.uri, diagnostics });
 }
+
+// Handle Go to Definition
+connection.onDefinition((params) => {
+  const { textDocument, position } = params;
+  const document = documents.get(textDocument.uri);
+  if (!document) return null;
+
+  const documentParser = parserCache.get(document.uri);
+  if (!documentParser || documentParser.status != ParserStatus.Ready) return null;
+
+  const word = documentParser.getWordAt(position.line, position.character);
+  if (!word) return null;
+
+  const definitions = documentParser.getDefinitionLocationsFor(word);
+  if (!definitions || definitions.length === 0) return null;
+
+  return definitions.map(def => Location.create(
+    textDocument.uri,
+    Range.create(def.start, def.end)
+  ));
+});
 
 connection.console.info('Yantra Language Server starting...');
 

@@ -1,19 +1,34 @@
-class ParseState {
-    // Current line properties
-    line = "";
-    lineNumber = 0;
-    matches = [];
-    result = null;
+//#region JSDoc Types
 
-    // Code Block properties
-    inCodeBlock = false;
-    currentCodeBlock;
-    expectCodeBlock = false;
-    expectNameOrCodeBlock = false;
+/**
+ * @typedef {Object} position
+ * @property {Number} line - One-based line number.
+ * @property {string} character - Zero-based character position in line.
+*/
 
-    // Document cumulative properties
-    errorCount = 0;
-}
+/**
+ * @typedef {Object} range
+ * @property {position} start - The starting position of an element.
+ * @property {position} end - The ending position of an element.
+ */
+
+/**
+ * @typedef {Object} YantraError
+ * @property {ErrorSeverity} severity - Error severity.
+ * @property {string} message - Error message.
+ * @property {range} range - The range of the element to which this error pertains.
+ */
+
+
+/**
+ * @typedef {Object} YantraTokenDefinition
+ * @property {string} tokenName
+ * @property {string} value
+ * @property {range} range
+ */
+//#endregion
+
+//#region Enums
 
 /**
  * Enumeration for the severity of errors (diagnotics)
@@ -25,6 +40,17 @@ export const ErrorSeverity = {
     Warning: 2,
     Information: 3,
     Hint: 4
+}
+
+/**
+ * Enumeration for Parser statuses.
+ * @readonly
+ * @enum {Symbol}
+ */
+export const ParserStatus = {
+    Initialized: Symbol('init'),
+    Parsing: Symbol('parsing'),
+    Ready: Symbol('ready')
 }
 
 /**
@@ -50,14 +76,55 @@ const ElementPatterns = {
 }
 
 Object.freeze(ErrorSeverity);
+Object.freeze(ParserStatus);
 Object.freeze(SyntaxPatterns);
 Object.freeze(ElementPatterns);
 
+//#endregion
+
+//#region Utility Functions
+
+/**
+ * Returns true if the parameter value is a valid Yantra token
+ * name, false otherwise.
+ * @param {string} word 
+ * @returns {Boolean}
+ */
+function isYantraTokenName(word) {
+    return ElementPatterns.TokenName.test(word);
+}
+
+//#endregion
+
+class ParseState {
+    // Current line properties
+    line = "";
+    lineNumber = 0;
+    matches = [];
+    result = null;
+
+    // Code Block properties
+    inCodeBlock = false;
+    currentCodeBlock;
+    expectCodeBlock = false;
+    expectNameOrCodeBlock = false;
+
+    // Document cumulative properties
+    errorCount = 0;
+}
+
+
 export class YantraParser {
+    /** @type {ParserStatus} */
+    #status;
+    /** @type {string} */
     #document;
+    /** @type {string[]} */
     #lines;
+    /** @type {string[]} */
     #results;
     #pragmas;
+    /** @type {Map<string,YantraTokenDefinition>} */
     #tokenDefinitions;
     #codeBlocks;
     #errors;
@@ -73,14 +140,14 @@ export class YantraParser {
         {
             "pattern": SyntaxPatterns.Pragma,
             "action": (state) => {
-                state = this.parsePragma(state);
+                state = this.#parsePragma(state);
                 return state
             }
         },
         {
             "pattern": SyntaxPatterns.TokenDefinition,
             "action": (state) => {
-                state = this.parseTokenDefinition(state);
+                state = this.#parseTokenDefinition(state);
                 return state
             }
         }
@@ -101,14 +168,34 @@ export class YantraParser {
     // Pragma parsers have the following signature:
     //  parser(state, pragma) -> state  
     #pragmaParsers = {
-        "class": this.parsePragmaClass,
-        "members": this.parsePragmaMember
+        "class": this.#parsePragmaClass,
+        "members": this.#parsePragmaMember
     };
 
     constructor() {
         this.clear();
     }
 
+    /**
+     * Parser status. Can be Initialized, Parsing or Ready.
+     * @returns {ParserStatus}
+     */
+    get status() {
+        return this.#status;
+    }
+
+    /**
+     * Errors detected after a  parse.
+     * @returns {YantraError[]}
+     */
+    get errors() {
+        return this.#errors;
+    }
+
+    /**
+     * Initializes the parser to a pristine state.
+     * @returns {void}
+     */
     clear() {
         this.#document = "";
         this.#lines = [];
@@ -122,20 +209,77 @@ export class YantraParser {
         this.#tokenDefinitions = new Map();
         this.#codeBlocks = [];
         this.#errors = [];
+
+        this.#status = ParserStatus.Initialized;
+    }
+
+    /**
+     * Returns the word surrounding the position (lineNumber, char).
+     * If there is a space at that position, or the position is 
+     * beyond the boundaries of the document, returns null.
+     * @param {Number} lineNumber 
+     * @param {Number} char 
+     * @returns {string|null}
+     */
+    getWordAt(lineNumber, char) {
+        if (lineNumber >= this.#lines.length) {
+            return null;
+        }
+
+        const line = this.#lines[lineNumber];
+        if (char >= line.length) {
+            return null
+        }
+
+        if (line.charAt(char).trim() === "") {
+            return null;
+        }
+        "".search()
+        const regex = /\b[\w%]+\b/g;
+        let match;
+        while ((match = regex.exec(line))) {
+            if (match.index <= char && regex.lastIndex >= char) {
+                return match[0];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Gets an array of locations where the definition(s) for the
+     * parameter are present. If the word is not recognized or
+     * no definitions exist, an empty array is returned.
+     * @param {string} word 
+     * @returns {range[]}
+     */
+    getDefinitionLocationsFor(word) {
+        const result = [];
+
+        if(isYantraTokenName(word)) {
+            if(this.#tokenDefinitions.has(word)) {
+                const tokdef = this.#tokenDefinitions.get(word);
+                result.push(tokdef.range);
+            }
+        }
+
+        return result
     }
 
     parse(inputText) {
         if (this.#document != inputText) {
+            this.#status = ParserStatus.Parsing;
             this.clear();
             this.#document = inputText;
             this.#lines = this.#document.split(/\r?\n/);
-            this.parseLines();
+            this.#parseLines();
+            this.#status = ParserStatus.Ready;
         }
 
         return this.#results.join("\n");
     }
 
-    parseLines() {
+    #parseLines() {
         const results = [];
         let state = new ParseState();
 
@@ -150,7 +294,7 @@ export class YantraParser {
             // everything else as a non-error.
             if (state.inCodeBlock) {
                 if (trimmedLine === "%}") {
-                    state = this.parseEndCodeBlock(state);
+                    state = this.#parseEndCodeBlock(state);
                     results.push(state.result);
                     continue;
                 } else {
@@ -163,7 +307,7 @@ export class YantraParser {
             // is not a block begin, that's the error. 
             if (state.expectCodeBlock) {
                 if (trimmedLine !== "%{") {
-                    state = this.addError(state, 'a code block was expected');
+                    state = this.#addError(state, 'a code block was expected');
                     state.expectCodeBlock = false;
                     results.push(state.result);
                     continue;
@@ -175,11 +319,11 @@ export class YantraParser {
                     results.push("Empty");
                     break;
                 case "%{":
-                    state = this.parseBeginCodeBlock(state);
+                    state = this.#parseBeginCodeBlock(state);
                     results.push(state.result);
                     break;
                 case "%}":
-                    state = this.parseEndCodeBlock(state);
+                    state = this.#parseEndCodeBlock(state);
                     results.push(state.result);
                     break;
                 default:
@@ -195,7 +339,7 @@ export class YantraParser {
                         }
                     }
                     if (!matched) {
-                        state = this.addError(state, 'Syntax Error');
+                        state = this.#addError(state, 'Syntax Error');
                         results.push(state.result);
                     }
                     break;
@@ -203,7 +347,7 @@ export class YantraParser {
 
             // Stop parsing if too many errors
             if (state.errorCount > 5) {
-                state = this.addError(state, 'Too many errors. Parsing will stop');
+                state = this.#addError(state, 'Too many errors. Parsing will stop');
                 results.push(state.result);
                 break;
             }
@@ -212,9 +356,9 @@ export class YantraParser {
         this.#results = results;
     }
 
-    parseBeginCodeBlock(state) {
+    #parseBeginCodeBlock(state) {
         if (!state.expectCodeBlock) {
-            state = this.addError(state, 'Unexpected start of code block');
+            state = this.#addError(state, 'Unexpected start of code block');
             return state;
         }
 
@@ -231,9 +375,9 @@ export class YantraParser {
         return state
     }
 
-    parseEndCodeBlock(state) {
+    #parseEndCodeBlock(state) {
         if (!state.inCodeBlock) {
-            state = this.addError(state, "Unexpected end of code block");
+            state = this.#addError(state, "Unexpected end of code block");
             return state;
         }
 
@@ -249,7 +393,7 @@ export class YantraParser {
         return state;
     }
 
-    parsePragma(state) {
+    #parsePragma(state) {
         // The pragma regexp returns [1]pragma name [2] all parameters [3] semicolon if present
         const [, name, params, terminator] = state.matches;
         const pragma = {
@@ -261,7 +405,7 @@ export class YantraParser {
         if (!parse) {
             const startColumn = state.matches.indices[1][1];
             const endColumn = startColumn + name.length;
-            state = this.addError(state, `Unknown pragma '${name}'`, startColumn, endColumn);
+            state = this.#addError(state, `Unknown pragma '${name}'`, startColumn, endColumn);
             return state;
         }
 
@@ -269,11 +413,11 @@ export class YantraParser {
         return state;
     }
 
-    parsePragmaClass(state, pragma) {
+    #parsePragmaClass(state, pragma) {
         // Check if class pragma has already appeared
         const classpragmas = this.#pragmas['class'];
         if (classpragmas.length > 0) {
-            state = this.addError(
+            state = this.#addError(
                 state,
                 'A %class pragma has already been specified'
             );
@@ -285,7 +429,7 @@ export class YantraParser {
             ? pragma.params.match(/^\s*?([A-Za-z][A-Za-z0-9_]*?)\s*?$/)
             : undefined;
         if (!paramMatch) {
-            state = this.addError(
+            state = this.#addError(
                 state,
                 'The %class pragma expects a single valid C++ class name as parameter'
             );
@@ -294,7 +438,7 @@ export class YantraParser {
 
         // Check for terminator
         if (!pragma.terminator) {
-            state = this.addError(state, 'A %class pragma should end with a semicolon');
+            state = this.#addError(state, 'A %class pragma should end with a semicolon');
             return state;
         }
 
@@ -304,14 +448,14 @@ export class YantraParser {
         return state
     }
 
-    parsePragmaMember(state, pragma) {
+    #parsePragmaMember(state, pragma) {
 
         const paramMatch = pragma.params
             ? pragma.params.match(/^\s*?([A-Za-z][A-Za-z0-9_]*?)\s*?$/)
             : undefined;
 
         if (!paramMatch) {
-            state = this.addError(
+            state = this.#addError(
                 state,
                 'The %members pragma expects a single valid C++ class name as parameter'
             );
@@ -319,7 +463,7 @@ export class YantraParser {
         }
 
         if (pragma.terminator) {
-            state = this.addError(
+            state = this.#addError(
                 state,
                 'The %members pragma should be followed by a code block, not a semicolon'
             );
@@ -334,13 +478,13 @@ export class YantraParser {
         return state;
     }
 
-    parseTokenDefinition(state) {
+    #parseTokenDefinition(state) {
         // The tokendef regexp returns [1]token name [2] token value [3] semicolon if present
         const [, tokenName, value, terminator] = state.matches;
 
         if (this.#tokenDefinitions.has(tokenName)) {
             const match = state.matches;
-            state = this.addError(
+            state = this.#addError(
                 state,
                 `Redefining a token is not allowed. Did you misspell ${tokenName} ?`,
                 ErrorSeverity.Warning,
@@ -351,7 +495,7 @@ export class YantraParser {
         }
 
         if (!terminator) {
-            state = this.addError(state, "A token definition should end with a semicolon");
+            state = this.#addError(state, "A token definition should end with a semicolon");
             return state;
         }
 
@@ -370,28 +514,8 @@ export class YantraParser {
     }
 
     /**
-     * @typedef {Object} position
-     * @property {Number} line - One-based line number.
-     * @property {string} character - Zero-based character position in line.
-    */
-
-    /**
-     * @typedef {Object} range
-     * @property {position} start - The starting position of an element.
-     * @property {position} end - The ending position of an element.
-     */
-
-    /**
-     * @typedef {Object} YantraError
-     * @property {ErrorSeverity} severity - Error severity.
-     * @property {string} message - Error message.
-     * @property {range} range - The range of the element to which this error pertains.
-     */
-
-
-
-    /**
      * Adds an error (diagnostic) to the current document
+     * @private
      * @param {ParseState} state 
      * @param {string} message - The diagnotic message
      * @param {ErrorSeverity} severity - The error severity. Default is Error.
@@ -400,7 +524,7 @@ export class YantraParser {
      * @param {Number} [endRow] - The line number where the diagnostic context ends. By default the current line number.
      * @returns {ParseState}
      */
-    addError(state, message, severity = ErrorSeverity.Error, startColumn, endColumn, endRow) {
+    #addError(state, message, severity = ErrorSeverity.Error, startColumn, endColumn, endRow) {
         const newError = {
             severity,
             message,
@@ -415,17 +539,5 @@ export class YantraParser {
 
         state.result = `ERROR: ${message}`;
         return state;
-    }
-
-    codeBlocks() {
-        return this.#codeBlocks;
-    }
-
-    /**
-     * Errors detected after a  parse.
-     * @returns {YantraError[]}
-     */
-    errors() {
-        return this.#errors;
     }
 }
