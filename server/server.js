@@ -7,8 +7,7 @@ import {
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
-// Placeholder: replace with your actual parser module
-// import { parseYantra } from './parser.js';
+import { YantraParser } from './YantraParser.js';
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
@@ -43,24 +42,25 @@ documents.onDidClose((event) => {
 
 // Diagnostic logic
 function updateDiagnostics(document) {
-  const text = document.getText();
+  let documentParser = parserCache.get(document.uri);
 
-  // Replace this with your actual parser logic
-  const diagnostics = [];
-
-  if (text.includes('TODO')) {
-    diagnostics.push({
-      severity: DiagnosticSeverity.Warning,
-      range: {
-        start: document.positionAt(text.indexOf('TODO')),
-        end: document.positionAt(text.indexOf('TODO') + 4),
-      },
-      message: 'Found TODO comment',
-      source: 'yantra',
-    });
+  if (!documentParser) {
+    documentParser = new YantraParser();
+    parserCache.set(document.uri, documentParser);
   }
 
-  parserCache.set(document.uri, { parsed: true }); // Placeholder cache entry
+  const text = document.getText();
+  documentParser.parse(text);
+
+  const diagnostics = documentParser.errors().map((yantraerror) => {
+    return {
+      severity: yantraerror.severity,
+      range: yantraerror.range,
+      message: yantraerror.message,
+      source: 'yantra-language-server',
+    }
+  });
+
   connection.sendDiagnostics({ uri: document.uri, diagnostics });
 }
 
