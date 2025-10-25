@@ -57,7 +57,7 @@ function updateDiagnostics(document) {
   const text = document.getText();
   documentParser.parse(text);
 
-  const diagnostics = documentParser.errors.map((yantraerror) => {
+  const diagnostics = documentParser.getErrors().map((yantraerror) => {
     return {
       severity: yantraerror.severity,
       range: yantraerror.range,

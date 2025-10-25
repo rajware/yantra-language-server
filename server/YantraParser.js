@@ -190,6 +190,8 @@ export class YantraParser {
     #codeBlocks;
     /** @type {YantraError[]} */
     #errors;
+    /** @type {Number} */
+    #errorThreshold = 25;
 
     #syntaxPatterns = [
         {
@@ -242,11 +244,21 @@ export class YantraParser {
     }
 
     /**
-     * Errors detected after a  parse.
-     * @returns {YantraError[]}
+     * Number of errors the parser can encounter, before it
+     * stops parsing.
+     * @returns {Number}
      */
-    get errors() {
-        return this.#errors;
+    get errorThreshold() {
+        return this.#errorThreshold;
+    }
+
+    /**
+     * Number of errors the parser can encounter, before it
+     * stops parsing.
+     * @param {Number} value
+     */
+    set errorThreshold(value) {
+        this.#errorThreshold = value;
     }
 
     /**
@@ -292,7 +304,7 @@ export class YantraParser {
         if (line.charAt(char).trim() === "") {
             return null;
         }
-        "".search()
+
         const regex = /\b[\w%]+\b/g;
         let match;
         while ((match = regex.exec(line))) {
@@ -306,8 +318,8 @@ export class YantraParser {
 
     /**
      * Gets an array of locations where the definition(s) for the
-     * parameter are present. If the word is not recognized or
-     * no definitions exist, an empty array is returned.
+     * parameter are present. If the word is not recognized or no
+     * definitions exist, an empty array is returned.
      * @param {string} word 
      * @returns {range[]}
      */
@@ -332,6 +344,21 @@ export class YantraParser {
         return result
     }
 
+    /**
+     * Errors detected after a  parse.
+     * @returns {YantraError[]}
+     */
+    getErrors() {
+        return this.#errors;
+    }
+
+    /**
+     * Parses the input as a Yantra document. If the document
+     * has not changed since the last invocation,  parsing is 
+     * not done.
+     * @param {string} inputText 
+     * @returns {string}
+     */
     parse(inputText) {
         if (this.#document != inputText) {
             this.#status = ParserStatus.Parsing;
@@ -438,7 +465,7 @@ export class YantraParser {
             }
 
             // Stop parsing if too many errors
-            if (state.errorCount > 5) {
+            if (state.errorCount > this.#errorThreshold) {
                 state = this.#addError(state, 'Too many errors. Parsing will stop');
                 results.push(state.result);
                 break;
@@ -502,6 +529,11 @@ export class YantraParser {
         return state;
     }
 
+    /**
+     * 
+     * @param {ParseState} state 
+     * @returns {ParseState}
+     */
     #parsePragma(state) {
         // A pragma can follow, and end, a rule definition
         if (state.inRuleDef) {
@@ -598,6 +630,11 @@ export class YantraParser {
         return state;
     }
 
+    /**
+     * 
+     * @param {ParseState} state 
+     * @returns {ParseState}
+     */
     #parseTokenDefinition(state) {
         // A tokendef can follow, and end, a rule definition
         if (state.inRuleDef) {
@@ -605,7 +642,7 @@ export class YantraParser {
         }
 
         // The tokendef regexp returns [1]token name [2] token value [3] "!' if present [4] semicolon if present
-        const [, tokenName, value, ,terminator] = state.matches;
+        const [, tokenName, value, , terminator] = state.matches;
 
         if (this.#tokenDefinitions.has(tokenName)) {
             const match = state.matches;
