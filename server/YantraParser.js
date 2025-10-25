@@ -1,18 +1,21 @@
 //#region JSDoc Types
 
 /**
+ * A position in a document.
  * @typedef {Object} position
- * @property {Number} line - One-based line number.
+ * @property {Number} line - Zero-based line number in document.
  * @property {string} character - Zero-based character position in line.
 */
 
 /**
+ * Start and end positions of an element.
  * @typedef {Object} range
- * @property {position} start - The starting position of an element.
- * @property {position} end - The ending position of an element.
+ * @property {position} start - The start position of an element.
+ * @property {position} end - The end position of an element.
  */
 
 /**
+ * An error or diagnostic, with location context.
  * @typedef {Object} YantraError
  * @property {ErrorSeverity} severity - Error severity.
  * @property {string} message - Error message.
@@ -21,9 +24,9 @@
 
 
 /**
- * @typedef {Object} YantraTokenDefinition
- * @property {string} tokenName
- * @property {string} value
+ * The name and range of a token, rule or other definition.
+ * @typedef {Object} YantraDefinition
+ * @property {string} name
  * @property {range} range
  */
 //#endregion
@@ -61,7 +64,9 @@ export const ParserStatus = {
 const SyntaxPatterns = {
     Comment: /^\s*?\/\/.*?$/,
     Pragma: /^\s*?%([a-z_]+)(?:\s+(.*?))?(;?)$/d,
-    TokenDefinition: /^\s*?([A-Z][A-Z0-9_]+)\s*?:=\s*?(".*?")(;)?\s*?$/d,
+    TokenDefinition: /^\s*?([A-Z][A-Z0-9_]+)\s*?:=\s*?(".*?")(!)?(;)?\s*?$/d,
+    RuleDefinition: /^\s*?([a-z][\w]*?)\s*?:=\s*?(.*?)(;)?\s*?$/d,
+    CodeBlockName: /^@(\w+)(?:::(\w+))?$/d
 }
 
 /**
@@ -70,7 +75,6 @@ const SyntaxPatterns = {
  * @enum {RegExp}
  */
 const ElementPatterns = {
-    CppName: /^\s*?([A-Z][A-Z0-9_]+)\s*?:=\s*?(".*?")(;)?\s*?$/d,
     TokenName: /^[A-Z][A-Z0-9_]+$/d,
     RuleName: /^[a-z][a-zA-Z0-9_]+$/d
 }
@@ -90,27 +94,82 @@ Object.freeze(ElementPatterns);
  * @param {string} word 
  * @returns {Boolean}
  */
-function isYantraTokenName(word) {
+const isYantraTokenName = (word) => {
     return ElementPatterns.TokenName.test(word);
 }
 
+const isYanraRuleName = (word) => {
+    return ElementPatterns.RuleName.test(word);
+}
 //#endregion
-
+/**
+ * @typedef {Object} ParseState
+ * @property {*} line
+ */
 class ParseState {
     // Current line properties
+    /**
+     * The line currently being parsed.
+     */
     line = "";
+    /**
+     * The line number (zero-based) currently being parsed.
+     */
     lineNumber = 0;
+    /**
+     * The regexp match that invoked the current parser.
+     */
     matches = [];
     result = null;
 
-    // Code Block properties
+    // Document cumulative properties
+    /**
+     * The total count of errors found so far.
+     */
+    errorCount = 0;
+
+    // Code Block related properties
+    /**
+     * If the scanner is currently in a code block.
+     */
     inCodeBlock = false;
     currentCodeBlock;
+    /**
+     * The next line parsed must be an anonymous code block start.
+     */
     expectCodeBlock = false;
-    expectNameOrCodeBlock = false;
 
-    // Document cumulative properties
-    errorCount = 0;
+    // Rule Definition related properties
+    /**
+     * The next line parsed must be a code block name. If 
+     * expectCodeBlock is also set, the next line can also
+     * be an anonymous code block.
+     */
+    expectNamedCodeBlock = false;
+    /**
+     * If the scanner is currently in a rule definition.
+     */
+    inRuleDef = false;
+    /**
+     * The line number of the start of the rule definition
+     * the scanner is currently in, or -1.
+     */
+    ruleDefLineNumber = -1;
+
+    startRuleDefWithCodeBlocks() {
+        this.inRuleDef = true;
+        this.ruleDefLineNumber = this.lineNumber;
+
+        // A rule defininition must be followed by
+        // a named or anonymous code block.
+        this.expectNamedCodeBlock = true;
+        this.expectCodeBlock = true;
+    }
+
+    resetRuleDef() {
+        this.inRuleDef = false
+        this.ruleDefLineNumber = -1;
+    }
 }
 
 
@@ -124,9 +183,12 @@ export class YantraParser {
     /** @type {string[]} */
     #results;
     #pragmas;
-    /** @type {Map<string,YantraTokenDefinition>} */
+    /** @type {Map<string,YantraDefinition>} */
     #tokenDefinitions;
+    /** @type {Map<string, YantraDefinition[]} */
+    #ruleDefinitions;
     #codeBlocks;
+    /** @type {YantraError[]} */
     #errors;
 
     #syntaxPatterns = [
@@ -150,19 +212,14 @@ export class YantraParser {
                 state = this.#parseTokenDefinition(state);
                 return state
             }
-        }
-        /*
-        ,
+        },
         {
-            "pattern": /([a-z][a-zA-Z0-9_]+)\s*?:=\s*?(".*?")(;)?$/,
-            "action":  (state) => {
-                const match = state.matches;
-                const error = match[3] ? "" : "ERROR: expected semicolon";
-                state.result = `rule Definitin :- RuleName: ${match[1]} Params: ${match[2]} Terminator: ${match[3]} ${error}`;
+            "pattern": SyntaxPatterns.RuleDefinition,
+            "action": (state) => {
+                state = this.#parseRuleDefinition(state);
                 return state;
             }
-        },
-        */
+        }
     ];
 
     // Pragma parsers have the following signature:
@@ -207,6 +264,7 @@ export class YantraParser {
         };
 
         this.#tokenDefinitions = new Map();
+        this.#ruleDefinitions = new Map();
         this.#codeBlocks = [];
         this.#errors = [];
 
@@ -256,10 +314,18 @@ export class YantraParser {
     getDefinitionLocationsFor(word) {
         const result = [];
 
-        if(isYantraTokenName(word)) {
-            if(this.#tokenDefinitions.has(word)) {
+        if (isYantraTokenName(word)) {
+            if (this.#tokenDefinitions.has(word)) {
                 const tokdef = this.#tokenDefinitions.get(word);
                 result.push(tokdef.range);
+            }
+        }
+
+        if (isYanraRuleName(word)) {
+            if (this.#ruleDefinitions.has(word)) {
+                const ruleDefs = this.#ruleDefinitions.get(word);
+                const ruleDefLocations = ruleDefs.map(def => def.range);
+                result.push(...ruleDefLocations);
             }
         }
 
@@ -303,11 +369,37 @@ export class YantraParser {
                 }
             }
 
+            // If a named code block is expected, check for
+            // the name first. This is the only case where
+            // a code block name is valid.
+            if (state.expectNamedCodeBlock) {
+                if (trimmedLine.charAt(0) === '@') {
+                    state.matches = line.match(SyntaxPatterns.CodeBlockName)
+                    if (state.matches) {
+                        state = this.#parseCodeBlockName(state);
+                        results.push(state.result);
+                        continue;
+                    }
+                }
+            }
+
             // If a code block is expected, and the current line
             // is not a block begin, that's the error. 
             if (state.expectCodeBlock) {
                 if (trimmedLine !== "%{") {
                     state = this.#addError(state, 'a code block was expected');
+
+                    if (state.inRuleDef) {
+                        state = this.#addError(
+                            state,
+                            'Rule definition should be followed by a semicolon or a code block',
+                            ErrorSeverity.Error,
+                            state.ruleDefLineNumber,
+                            0
+                        )
+                        state.resetRuleDef();
+                    }
+
                     state.expectCodeBlock = false;
                     results.push(state.result);
                     continue;
@@ -356,6 +448,11 @@ export class YantraParser {
         this.#results = results;
     }
 
+    /**
+     * 
+     * @param {ParseState} state 
+     * @returns {ParseState}
+     */
     #parseBeginCodeBlock(state) {
         if (!state.expectCodeBlock) {
             state = this.#addError(state, 'Unexpected start of code block');
@@ -375,6 +472,11 @@ export class YantraParser {
         return state
     }
 
+    /**
+     * 
+     * @param {ParseState} state 
+     * @returns {ParseState}
+     */
     #parseEndCodeBlock(state) {
         if (!state.inCodeBlock) {
             state = this.#addError(state, "Unexpected end of code block");
@@ -389,11 +491,23 @@ export class YantraParser {
 
         state.currentCodeBlock = undefined;
         state.inCodeBlock = false;
+
+        // If a code block ends while in a rule definition
+        // then we expect a name next.
+        if (state.inRuleDef) {
+            state.expectNamedCodeBlock = true;
+        }
+
         state.result = "End Code Block";
         return state;
     }
 
     #parsePragma(state) {
+        // A pragma can follow, and end, a rule definition
+        if (state.inRuleDef) {
+            state.resetRuleDef();
+        }
+
         // The pragma regexp returns [1]pragma name [2] all parameters [3] semicolon if present
         const [, name, params, terminator] = state.matches;
         const pragma = {
@@ -403,9 +517,15 @@ export class YantraParser {
         }
         const parse = this.#pragmaParsers[name];
         if (!parse) {
-            const startColumn = state.matches.indices[1][1];
-            const endColumn = startColumn + name.length;
-            state = this.#addError(state, `Unknown pragma '${name}'`, startColumn, endColumn);
+            const startColumn = state.matches.indices[1][0];
+            const endColumn = state.matches.indices[1][1];
+            state = this.#addError(
+                state,
+                `Unknown pragma '${name}'`,
+                ErrorSeverity.Error,
+                startColumn,
+                endColumn
+            );
             return state;
         }
 
@@ -479,8 +599,13 @@ export class YantraParser {
     }
 
     #parseTokenDefinition(state) {
-        // The tokendef regexp returns [1]token name [2] token value [3] semicolon if present
-        const [, tokenName, value, terminator] = state.matches;
+        // A tokendef can follow, and end, a rule definition
+        if (state.inRuleDef) {
+            state.resetRuleDef();
+        }
+
+        // The tokendef regexp returns [1]token name [2] token value [3] "!' if present [4] semicolon if present
+        const [, tokenName, value, ,terminator] = state.matches;
 
         if (this.#tokenDefinitions.has(tokenName)) {
             const match = state.matches;
@@ -499,18 +624,81 @@ export class YantraParser {
             return state;
         }
 
+        // Push definition
         this.#tokenDefinitions.set(tokenName, {
-            tokenName,
-            value,
+            name: tokenName,
             range: {
                 start: { line: state.lineNumber, character: 0 },
                 end: { line: state.lineNumber, character: state.line.length },
             }
         });
 
-        state.result = `Token Definition :- Token: ${tokenName}(${state.matches.indices[1]}) Value: ${value} Terminator: ${terminator}`;
+        state.result = `Token Definition :- Token: ${tokenName} Value: ${value} Terminator: ${terminator}`;
 
         return state;
+    }
+
+    /**
+     * 
+     * @param {ParseState} state 
+     * @returns {ParseState}
+     */
+    #parseRuleDefinition(state) {
+        // A ruledef can follow, and end, a previous rule definition
+        if (state.inRuleDef) {
+            state.resetRuleDef();
+        }
+
+        // The ruledef regexp returns [1]rule name [2] rule definition [3] semicolon if present
+        const [, ruleName, ruledef, terminator] = state.matches;
+
+        // validate ruledef
+        const ruledefreg = /^\s*?(?:(?:([a-zA-Z]\w*?)\s*?)(?:\(([a-zA-Z]\w*?)\)\s*?)?)+$/
+        if (!ruledefreg.test(ruledef)) {
+            state = this.#addError(state, `Syntax error in rule definition: '${ruledef}'`);
+            return state;
+        }
+
+        // A rule definition that does not end in a semicolon is expecting
+        // a code block
+        if (!terminator) {
+            state.startRuleDefWithCodeBlocks();
+        }
+
+        // Push definintion
+        /** @type {YantraDefinition[]} */
+        let ruleDefs;
+        if (this.#ruleDefinitions.has(ruleName)) {
+            ruleDefs = this.#ruleDefinitions.get(ruleName);
+        } else {
+            ruleDefs = [];
+            this.#ruleDefinitions.set(ruleName, ruleDefs);
+        }
+        ruleDefs.push({
+            name: ruleName,
+            range: {
+                start: { line: state.lineNumber, character: 0 },
+                end: { line: state.lineNumber, character: state.line.length }
+            }
+        })
+
+        state.result = `Rule Definition := Rulename: ${ruleName}`;
+        return state;
+    }
+
+    /**
+     * 
+     * @param {ParseState} state 
+     * @returns {ParseState}
+     */
+    #parseCodeBlockName(state) {
+        // Once a name is parsed, we no longer expect a
+        // name, but we immediately expect a code block
+        state.expectNamedCodeBlock = false;
+        state.expectCodeBlock = true;
+
+        state.result = "Code Block Name";
+        return state
     }
 
     /**
