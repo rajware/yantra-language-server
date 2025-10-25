@@ -15,11 +15,28 @@ import { ParserStatus, YantraParser } from './YantraParser.js';
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 
-// Per-document parser cache
-/** @type {Map<URI, YantraParser} */
+// Server properties
+
+/** 
+ * Per-document parser cache
+ * @type {Map<URI, YantraParser} */
 const parserCache = new Map();
 
-connection.onInitialize(() => {
+/**
+ * @typedef {object} ServerConfig
+ * @property {Number} errThreshold - Number of errors allowed before the Yantra parser stops
+ */
+
+/** Server configuration 
+ * @type {ServerConfig}
+*/
+const serverConfig = {
+  errThreshold: 25
+}
+
+connection.onInitialize((params) => {
+  serverConfig.errThreshold = params.initializationOptions?.errorThreshold ?? 25;
+
   return {
     capabilities: {
       textDocumentSync: documents.syncKind,
@@ -31,6 +48,7 @@ connection.onInitialize(() => {
 // Handle document open
 documents.onDidOpen((event) => {
   const doc = event.document;
+  connection.console.info(`Opened document ${doc.uri}`);
   updateDiagnostics(doc);
 });
 
@@ -42,7 +60,21 @@ documents.onDidChangeContent((change) => {
 
 // Handle document close
 documents.onDidClose((event) => {
-  parserCache.delete(event.document.uri);
+  const doc = event.document;
+  connection.sendDiagnostics({ uri: doc.uri, diagnostics: [] });
+  parserCache.delete(doc.uri);
+  connection.console.info(`Closed document ${doc.uri}`);
+});
+
+// Handle settings change
+connection.onNotification('yantra/errorThresholdChanged', (params) => {
+  if (serverConfig.errThreshold != params.value) {
+    serverConfig.errThreshold = params.value;
+    parserCache.forEach((parser) => {
+      parser.errorThreshold = serverConfig.errThreshold;
+    });
+  }
+  connection.console.info(`Error threshold updated to ${params.value}`);
 });
 
 // Diagnostic logic
@@ -51,6 +83,7 @@ function updateDiagnostics(document) {
 
   if (!documentParser) {
     documentParser = new YantraParser();
+    documentParser.errorThreshold = serverConfig.errThreshold;
     parserCache.set(document.uri, documentParser);
   }
 

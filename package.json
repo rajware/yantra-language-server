@@ -11,6 +11,16 @@
   "main": "./client/extension.js",
   "type": "module",
   "contributes": {
+    "configuration": {
+      "title": "Yantra Language Server",
+      "properties": {
+        "yantra.errorThreshold": {
+          "type": "number",
+          "default": 25,
+          "description": "Maximum number of errors to report before suppressing further diagnostics."
+        }
+      }
+    },
     "languages": [
       {
         "id": "yantra",
