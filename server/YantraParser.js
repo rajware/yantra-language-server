@@ -29,6 +29,56 @@
  * @property {string} name
  * @property {range} range
  */
+
+/**
+ * A Lexical token
+ * @typedef {Object} LexicalToken
+ * @property {string} lexeme;
+ * @property {range} range;
+ */
+
+
+/**
+ * The pragma nonteriminal
+ * @typedef {Object} Pragma
+ * @property {LexicalToken} name
+ * @property {LexicalToken|null} params
+ * @property {LexicalToken|null} terminator
+ */
+
+/**
+ * A parser function
+ * @callback Parser
+ * @this {YantraParser}
+ * @param {ParseState} state
+ * @returns {ParseState}
+ */
+
+/**
+ * A pragma parser function
+ * @callback PragmaParser
+ * @this {YantraParser}
+ * @param {ParseState} state
+ * @param {Pragma} pragma
+ * @returns {ParseState}
+ */
+
+/**
+ * A regex and action combination that identifies a
+ * non-terminal
+ * @typedef {Object} SyntaxPattern
+ * @property {RegExp} pattern
+ * @property {Parser} action
+ */
+
+/**
+ * An object that holds metadata about the different
+ * types of pragmas.
+ * @typedef {Object} PragmasMetaData
+ * @property {any[]} class
+ * @property {Map<string,any>} walkers
+ * 
+ */
 //#endregion
 
 //#region Enums
@@ -61,10 +111,10 @@ export const ParserStatus = {
  * @readonly
  * @enum {RegExp}
  */
-const SyntaxPatterns = {
+const SyntaxPattern = {
     Comment: /^\s*?\/\/.*?$/,
     Pragma: /^\s*?%([a-z_]+)(?:\s+(.*?))?(;?)$/d,
-    TokenDefinition: /^\s*?([A-Z][A-Z0-9_]+)\s*?:=\s*?(".*?")(!)?(;)?\s*?$/d,
+    TokenDefinition: /^\s*?([A-Z][A-Z0-9_]+)\s*?:=\s*?(".*?")(!)?\s*?(;)?\s*?$/d,
     RuleDefinition: /^\s*?([a-z][\w]*?)\s*?:=\s*?(.*?)(;)?\s*?$/d,
     CodeBlockName: /^@(\w+)(?:::(\w+))?$/d
 }
@@ -74,16 +124,27 @@ const SyntaxPatterns = {
  * @readonly
  * @enum {RegExp}
  */
-const ElementPatterns = {
-    TokenName: /^[A-Z][A-Z0-9_]+$/d,
-    RuleName: /^[a-z][a-zA-Z0-9_]+$/d
+const ElementPattern = {
+    TokenName: /^[A-Z]\w+$/d,
+    RuleName: /^[a-z]\w+$/d,
+    CppName: /^[a-zA-Z_]\w*$/d,
+    SpacedCppName: /^\s*?([a-zA-Z_]\w*?)\s*$/d
+}
+
+/**
+ * Enumeration for repeated regex patterns used to detect elements (tokens)
+ * @readonly
+ * @enum {RegExp}
+ */
+const RepeatedElementPattern = {
+    CppNames: /\s*?(?:([a-zA-Z]\w*)\s*?)+/dg
 }
 
 Object.freeze(ErrorSeverity);
 Object.freeze(ParserStatus);
-Object.freeze(SyntaxPatterns);
-Object.freeze(ElementPatterns);
-
+Object.freeze(SyntaxPattern);
+Object.freeze(ElementPattern);
+Object.freeze(RepeatedElementPattern);
 //#endregion
 
 //#region Utility Functions
@@ -95,16 +156,101 @@ Object.freeze(ElementPatterns);
  * @returns {Boolean}
  */
 const isYantraTokenName = (word) => {
-    return ElementPatterns.TokenName.test(word);
+    return ElementPattern.TokenName.test(word);
 }
 
-const isYanraRuleName = (word) => {
-    return ElementPatterns.RuleName.test(word);
+/**
+ * Returns true if the parameter value is a valid Yantra rule
+ * name, false otherwise.
+ * @param {string} word 
+ * @returns {Boolean}
+ */
+const isYantraRuleName = (word) => {
+    return ElementPattern.RuleName.test(word);
+}
+
+/**
+ * Creates a regexp from the passed regexp that adds ^ and $
+ * at the start and end respectively
+ * @param {RegExp} input
+ * @returns {RegExp}
+ */
+const ensureOnly = (input) => {
+    const inputstr = input.source;
+    return new RegExp(`^${inputstr}$`, input.flags);
+}
+
+/**
+ * Creates a lexical token from a scanner match of the current
+ * line. 
+ * @param {ParseState} state 
+ * @param {Number} matchIndex 
+ * @returns {LexicalToken|null}
+ */
+const lexicalTokenFromLine = (state, matchIndex) => {
+    const matches = state.matches
+    const match = matches[matchIndex];
+    if (!match) return null;
+
+    const indices = matches.indices[matchIndex];
+    return {
+        lexeme: match,
+        range: {
+            start: { line: state.lineNumber, character: indices[0] },
+            end: { line: state.lineNumber, character: indices[1] },
+        }
+    }
+}
+
+/**
+ * 
+ * @param {ParseState} state
+ * @returns {Pragma}
+ */
+const newPragma = (state) => {
+    // The pragma regexp returns [1]pragma name [2] all parameters [3] semicolon if present
+    return {
+        name: lexicalTokenFromLine(state, 1),
+        params: lexicalTokenFromLine(state, 2),
+        terminator: lexicalTokenFromLine(state, 3)
+    }
+}
+
+/**
+ * Creates a definition from an element in the current line, or the entire line, and pushes
+ * it to a definitions array
+ * @param {ParseState} state
+ * @param {YantraDefinition[]} definitions
+ * @param {string} name - The name of the element being defined
+ * @param {Number} [startColumn]
+ * @param {Number} [endColumn]
+ * @returns {YantraDefinition}
+ */
+const pushDefinition = (state, definitions, name, startColumn, endColumn) => {
+    let defs;
+
+    if (definitions.has(name)) {
+        defs = definitions.get(name);
+    } else {
+        defs = [];
+        definitions.set(name, defs);
+    }
+
+    const def = {
+        name,
+        range: {
+            start: { line: state.lineNumber, character: startColumn ?? 0 },
+            end: { line: state.lineNumber, character: endColumn ?? state.line.length },
+        }
+    };
+
+    defs.push(def);
+    return def;
 }
 //#endregion
+
 /**
- * @typedef {Object} ParseState
- * @property {*} line
+ * Parser state in the current line.
  */
 class ParseState {
     // Current line properties
@@ -118,6 +264,7 @@ class ParseState {
     lineNumber = 0;
     /**
      * The regexp match that invoked the current parser.
+     * @type {RegExpMatchArray | null}
      */
     matches = [];
     result = null;
@@ -182,53 +329,49 @@ export class YantraParser {
     #lines;
     /** @type {string[]} */
     #results;
+    /** @type {PragmasMetaData}} */
     #pragmas;
-    /** @type {Map<string,YantraDefinition>} */
+    /** @type {Map<string,YantraDefinition[]>} */
     #tokenDefinitions;
     /** @type {Map<string, YantraDefinition[]} */
     #ruleDefinitions;
+    /** @type {Map<string, YantraDefinition[]} */
+    #walkerDefinitions;
     #codeBlocks;
     /** @type {YantraError[]} */
     #errors;
     /** @type {Number} */
     #errorThreshold = 25;
-
+    /** @type {SyntaxPattern[]} */
     #syntaxPatterns = [
         {
-            "pattern": SyntaxPatterns.Comment,
+            "pattern": SyntaxPattern.Comment,
             "action": (state) => {
                 state.result = "Comment.";
                 return state;
             }
         },
         {
-            "pattern": SyntaxPatterns.Pragma,
-            "action": (state) => {
-                state = this.#parsePragma(state);
-                return state
-            }
+            "pattern": SyntaxPattern.Pragma,
+            "action": (state) => this.#parsePragma(state)
         },
         {
-            "pattern": SyntaxPatterns.TokenDefinition,
-            "action": (state) => {
-                state = this.#parseTokenDefinition(state);
-                return state
-            }
+            "pattern": SyntaxPattern.TokenDefinition,
+            "action": (state) => this.#parseTokenDefinition(state)
         },
         {
-            "pattern": SyntaxPatterns.RuleDefinition,
-            "action": (state) => {
-                state = this.#parseRuleDefinition(state);
-                return state;
-            }
+            "pattern": SyntaxPattern.RuleDefinition,
+            "action": (state) => this.#parseRuleDefinition(state)
         }
     ];
 
-    // Pragma parsers have the following signature:
-    //  parser(state, pragma) -> state  
+    /**
+     * @type {Map<string,PragmaParser>}
+     */
     #pragmaParsers = {
         "class": this.#parsePragmaClass,
-        "members": this.#parsePragmaMember
+        "walkers": this.#parsePragmaWalkers,
+        "members": this.#parsePragmaMembers
     };
 
     constructor() {
@@ -271,12 +414,14 @@ export class YantraParser {
         this.#results = [];
 
         this.#pragmas = {
-            "class": [],
-            "members": []
+            class: [],
+            walkers: undefined,
+            members: []
         };
 
         this.#tokenDefinitions = new Map();
         this.#ruleDefinitions = new Map();
+        this.#walkerDefinitions = new Map();
         this.#codeBlocks = [];
         this.#errors = [];
 
@@ -328,17 +473,24 @@ export class YantraParser {
 
         if (isYantraTokenName(word)) {
             if (this.#tokenDefinitions.has(word)) {
-                const tokdef = this.#tokenDefinitions.get(word);
-                result.push(tokdef.range);
+                const tokdefs = this.#tokenDefinitions.get(word);
+                const tokDefinitions = tokdefs.map(def => def.range);
+                result.push(...tokDefinitions);
             }
         }
 
-        if (isYanraRuleName(word)) {
+        if (isYantraRuleName(word)) {
             if (this.#ruleDefinitions.has(word)) {
                 const ruleDefs = this.#ruleDefinitions.get(word);
                 const ruleDefLocations = ruleDefs.map(def => def.range);
                 result.push(...ruleDefLocations);
             }
+        }
+
+        if (this.#walkerDefinitions.has(word)) {
+            const walkerDefs = this.#walkerDefinitions.get(word);
+            const walkerDefLocations = walkerDefs.map(def => def.range);
+            result.push(...walkerDefLocations);
         }
 
         return result
@@ -401,7 +553,7 @@ export class YantraParser {
             // a code block name is valid.
             if (state.expectNamedCodeBlock) {
                 if (trimmedLine.charAt(0) === '@') {
-                    state.matches = line.match(SyntaxPatterns.CodeBlockName)
+                    state.matches = line.match(SyntaxPattern.CodeBlockName)
                     if (state.matches) {
                         state = this.#parseCodeBlockName(state);
                         results.push(state.result);
@@ -541,12 +693,10 @@ export class YantraParser {
         }
 
         // The pragma regexp returns [1]pragma name [2] all parameters [3] semicolon if present
-        const [, name, params, terminator] = state.matches;
-        const pragma = {
-            name,
-            params,
-            terminator
-        }
+        const pragma = newPragma(state);
+        //const [, name, params, terminator] = state.matches;
+        const name = pragma.name.lexeme;
+
         const parse = this.#pragmaParsers[name];
         if (!parse) {
             const startColumn = state.matches.indices[1][0];
@@ -561,10 +711,13 @@ export class YantraParser {
             return state;
         }
 
+        // Call a pragmaparser function, ensuring that 'this'
+        // is the current YantraParser
         state = parse.call(this, state, pragma);
         return state;
     }
 
+    /** @type {PragmaParser} */
     #parsePragmaClass(state, pragma) {
         // Check if class pragma has already appeared
         const classpragmas = this.#pragmas['class'];
@@ -578,7 +731,7 @@ export class YantraParser {
 
         // Check for parameter validity
         const paramMatch = pragma.params
-            ? pragma.params.match(/^\s*?([A-Za-z][A-Za-z0-9_]*?)\s*?$/)
+            ? pragma.params.lexeme.match(ElementPattern.SpacedCppName)
             : undefined;
         if (!paramMatch) {
             state = this.#addError(
@@ -600,10 +753,54 @@ export class YantraParser {
         return state
     }
 
-    #parsePragmaMember(state, pragma) {
+    /** @type {PragmaParser} */
+    #parsePragmaWalkers(state, pragma) {
+        // Check if walkers pragma has already appeared
+        const walkerspragmas = this.#pragmas.walkers;
+        if (walkerspragmas) {
+            state = this.#addError(
+                state,
+                'A %walkers pragma has already been specified'
+            );
+            return state;
+        }
+
+        const paramsMatch = !pragma.params
+            ? undefined
+            : ensureOnly(RepeatedElementPattern.CppNames).test(pragma.params.lexeme)
+                ? Array.from(pragma.params.lexeme.matchAll(RepeatedElementPattern.CppNames))
+                : undefined;
+
+        if (!paramsMatch || paramsMatch.length === 0) {
+            state = this.#addError(
+                state,
+                'The %walkers pragma expects one or more valid C++ class names'
+            );
+            return state;
+        }
+
+        this.#pragmas.walkers = new Map();
+        for (let i = 0; i < paramsMatch.length; i++) {
+            // Each match has the elements [1] Walkername
+            const walkerName = paramsMatch[i][1];
+            const startColumn = pragma.params.range.start.character + paramsMatch[i].indices[1][0];
+            const endColumn = startColumn + walkerName.length
+
+            // For now, add a key with the value false for members not defined.
+            this.#pragmas.walkers.set(walkerName, false);
+            // Also push as definition
+            pushDefinition(state, this.#walkerDefinitions, walkerName, startColumn, endColumn);
+        }
+
+        state.result = "Walkers pragma";
+        return state
+    }
+
+    /** @type {PragmaParser} */
+    #parsePragmaMembers(state, pragma) {
 
         const paramMatch = pragma.params
-            ? pragma.params.match(/^\s*?([A-Za-z][A-Za-z0-9_]*?)\s*?$/)
+            ? pragma.params.lexeme.match(ElementPattern.SpacedCppName)
             : undefined;
 
         if (!paramMatch) {
@@ -621,6 +818,36 @@ export class YantraParser {
             );
             return state;
         }
+
+        // Add a warning if the mentioned walker has not been declared
+        const walkerName = paramMatch[1];
+        const startColumn = pragma.params.range.start.character + paramMatch.indices[1][0];
+        const endColumn = startColumn+walkerName.length;
+
+        if (!this.#pragmas.walkers?.has(walkerName)) {
+            state = this.#addError(
+                state,
+                `A walker called '${walkerName}' has not been defined`,
+                ErrorSeverity.Warning,
+                startColumn,
+                endColumn
+            )
+        }
+
+        // Add a warning if a members pragma already exists for this walker
+        const membersDefinedForWalker = this.#pragmas.walkers?.get(walkerName);
+        if(membersDefinedForWalker) {
+            state = this.#addError(
+                state,
+                `Members have already been defined for a walker called '${walkerName}'`,
+                ErrorSeverity.Warning,
+                startColumn,
+                endColumn
+            )
+        }
+
+        // For now, set the walker value to true, signifying members defined.
+        this.#pragmas.walkers?.set(walkerName, true);
 
         const memberspragmas = this.#pragmas['members'];
         memberspragmas.push({ walkerName: paramMatch[1] });
@@ -644,34 +871,32 @@ export class YantraParser {
         // The tokendef regexp returns [1]token name [2] token value [3] "!' if present [4] semicolon if present
         const [, tokenName, value, , terminator] = state.matches;
 
-        if (this.#tokenDefinitions.has(tokenName)) {
-            const match = state.matches;
-            state = this.#addError(
-                state,
-                `Redefining a token is not allowed. Did you misspell ${tokenName} ?`,
-                ErrorSeverity.Warning,
-                match.indices[1][0],
-                match.indices[1][1]
-            );
-            return state;
-        }
-
         if (!terminator) {
             state = this.#addError(state, "A token definition should end with a semicolon");
             return state;
         }
 
         // Push definition
-        this.#tokenDefinitions.set(tokenName, {
-            name: tokenName,
-            range: {
-                start: { line: state.lineNumber, character: 0 },
-                end: { line: state.lineNumber, character: state.line.length },
-            }
-        });
+        // /** @type {YantraDefinition[]} */
+        // let tokenDefs;
+
+        // if (this.#tokenDefinitions.has(tokenName)) {
+        //     tokenDefs = this.#tokenDefinitions.get(tokenName);
+        // } else {
+        //     tokenDefs = [];
+        //     this.#tokenDefinitions.set(tokenName, tokenDefs);
+        // }
+
+        // tokenDefs.push({
+        //     name: tokenName,
+        //     range: {
+        //         start: { line: state.lineNumber, character: 0 },
+        //         end: { line: state.lineNumber, character: state.line.length },
+        //     }
+        // });
+        pushDefinition(state, this.#tokenDefinitions, tokenName);
 
         state.result = `Token Definition :- Token: ${tokenName} Value: ${value} Terminator: ${terminator}`;
-
         return state;
     }
 
@@ -703,21 +928,22 @@ export class YantraParser {
         }
 
         // Push definintion
-        /** @type {YantraDefinition[]} */
-        let ruleDefs;
-        if (this.#ruleDefinitions.has(ruleName)) {
-            ruleDefs = this.#ruleDefinitions.get(ruleName);
-        } else {
-            ruleDefs = [];
-            this.#ruleDefinitions.set(ruleName, ruleDefs);
-        }
-        ruleDefs.push({
-            name: ruleName,
-            range: {
-                start: { line: state.lineNumber, character: 0 },
-                end: { line: state.lineNumber, character: state.line.length }
-            }
-        })
+        // /** @type {YantraDefinition[]} */
+        // let ruleDefs;
+        // if (this.#ruleDefinitions.has(ruleName)) {
+        //     ruleDefs = this.#ruleDefinitions.get(ruleName);
+        // } else {
+        //     ruleDefs = [];
+        //     this.#ruleDefinitions.set(ruleName, ruleDefs);
+        // }
+        // ruleDefs.push({
+        //     name: ruleName,
+        //     range: {
+        //         start: { line: state.lineNumber, character: 0 },
+        //         end: { line: state.lineNumber, character: state.line.length }
+        //     }
+        // })
+        pushDefinition(state, this.#ruleDefinitions, ruleName);
 
         state.result = `Rule Definition := Rulename: ${ruleName}`;
         return state;
