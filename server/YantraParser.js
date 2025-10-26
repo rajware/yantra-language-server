@@ -47,6 +47,20 @@
  */
 
 /**
+ * The code block name nonterminal
+ * @typedef {Object} CodeBlockName
+ * @property {string} className
+ * @property {string} functionName
+ */
+
+/**
+ * The code block nonterminal
+ * @typedef {Object} CodeBlock
+ * @property {string} name
+ * @property {range} range
+ */
+
+/**
  * A parser function
  * @callback Parser
  * @this {YantraParser}
@@ -217,13 +231,28 @@ const newPragma = (state) => {
 }
 
 /**
+ * 
+ * @param {ParseState} state 
+ * @returns {CodeBlock}
+ */
+const newCodeBlock = (state, name) => {
+    return {
+        name,
+        range: {
+            start: { line: state.lineNumber, character: 0 },
+            end
+        }
+    }
+}
+
+/**
  * Creates a definition from an element in the current line, or the entire line, and pushes
  * it to a definitions array
  * @param {ParseState} state
- * @param {YantraDefinition[]} definitions
+ * @param {YantraDefinition[]} definitions - A definitions array
  * @param {string} name - The name of the element being defined
- * @param {Number} [startColumn]
- * @param {Number} [endColumn]
+ * @param {Number} [startColumn] - The start column of the element. Default 0.
+ * @param {Number} [endColumn] - The end column of the element. Default line length.
  * @returns {YantraDefinition}
  */
 const pushDefinition = (state, definitions, name, startColumn, endColumn) => {
@@ -280,7 +309,17 @@ class ParseState {
      * If the scanner is currently in a code block.
      */
     inCodeBlock = false;
+    /**
+     * The current code block
+     * @type {CodeBlock}
+     */
     currentCodeBlock;
+    /**
+     * Code block name
+     * @type {CodeBlockName}
+     */
+    codeBlockName;
+
     /**
      * The next line parsed must be an anonymous code block start.
      */
@@ -302,6 +341,22 @@ class ParseState {
      * the scanner is currently in, or -1.
      */
     ruleDefLineNumber = -1;
+
+    /**
+     * Set a name for the next code block
+     * @param {string} className - Name of a walker, by default the default walker
+     * @param {string} [functionName] - Name of a function, or by default "go"
+     */
+    setCodeBlockName(className, functionName) {
+        this.codeBlockName = {
+            className,
+            functionName: functionName ?? 'go'
+        };
+    }
+
+    resetCodeBlockName() {
+        this.codeBlockName = undefined;
+    }
 
     startRuleDefWithCodeBlocks() {
         this.inRuleDef = true;
@@ -337,6 +392,7 @@ export class YantraParser {
     #ruleDefinitions;
     /** @type {Map<string, YantraDefinition[]} */
     #walkerDefinitions;
+    /** @type {CodeBlock[]} */
     #codeBlocks;
     /** @type {YantraError[]} */
     #errors;
@@ -640,10 +696,11 @@ export class YantraParser {
         }
 
         state.currentCodeBlock = {
-            start: {
-                line: state.lineNumber
-            },
-            end: undefined
+            name: `${state.codeBlockName.className}::${state.codeBlockName.functionName}`,
+            range: {
+                start: { line: state.lineNumber, character: 0 },
+                end: undefined
+            }
         }
 
         state.inCodeBlock = true
@@ -663,14 +720,17 @@ export class YantraParser {
             return state;
         }
 
-        state.currentCodeBlock.end = {
-            line: state.lineNumber
+        state.currentCodeBlock.range.end = {
+            line: state.lineNumber,
+            character: 0
         }
 
         this.#codeBlocks.push(state.currentCodeBlock);
 
+        // Reset current code block and name
         state.currentCodeBlock = undefined;
         state.inCodeBlock = false;
+        state.resetCodeBlockName();
 
         // If a code block ends while in a rule definition
         // then we expect a name next.
@@ -898,7 +958,13 @@ export class YantraParser {
         // const memberspragmas = this.#pragmas['members'];
         // memberspragmas.push({ walkerName: paramMatch[1] });
 
+        // A members pragma must be followed by an anonymous code 
+        // block, so we will supply a name ourselves.
+        state.setCodeBlockName(walkerName, 'Members');
+        // A members pragma must be followed by an anonymous code 
+        // block
         state.expectCodeBlock = true;
+
         state.result = `Members pragma: walkername: ${paramMatch[1]}`;
         return state;
     }
@@ -923,23 +989,6 @@ export class YantraParser {
         }
 
         // Push definition
-        // /** @type {YantraDefinition[]} */
-        // let tokenDefs;
-
-        // if (this.#tokenDefinitions.has(tokenName)) {
-        //     tokenDefs = this.#tokenDefinitions.get(tokenName);
-        // } else {
-        //     tokenDefs = [];
-        //     this.#tokenDefinitions.set(tokenName, tokenDefs);
-        // }
-
-        // tokenDefs.push({
-        //     name: tokenName,
-        //     range: {
-        //         start: { line: state.lineNumber, character: 0 },
-        //         end: { line: state.lineNumber, character: state.line.length },
-        //     }
-        // });
         pushDefinition(state, this.#tokenDefinitions, tokenName);
 
         state.result = `Token Definition :- Token: ${tokenName} Value: ${value} Terminator: ${terminator}`;
@@ -970,25 +1019,13 @@ export class YantraParser {
         // A rule definition that does not end in a semicolon is expecting
         // a code block
         if (!terminator) {
+            // We will set a default name for the first code block, which
+            // could be anonymous
+            state.setCodeBlockName(this.#pragmas.defaultWalker, 'go');
             state.startRuleDefWithCodeBlocks();
         }
 
         // Push definintion
-        // /** @type {YantraDefinition[]} */
-        // let ruleDefs;
-        // if (this.#ruleDefinitions.has(ruleName)) {
-        //     ruleDefs = this.#ruleDefinitions.get(ruleName);
-        // } else {
-        //     ruleDefs = [];
-        //     this.#ruleDefinitions.set(ruleName, ruleDefs);
-        // }
-        // ruleDefs.push({
-        //     name: ruleName,
-        //     range: {
-        //         start: { line: state.lineNumber, character: 0 },
-        //         end: { line: state.lineNumber, character: state.line.length }
-        //     }
-        // })
         pushDefinition(state, this.#ruleDefinitions, ruleName);
 
         state.result = `Rule Definition := Rulename: ${ruleName}`;
@@ -1001,6 +1038,30 @@ export class YantraParser {
      * @returns {ParseState}
      */
     #parseCodeBlockName(state) {
+        // The codeblockname regexp returns
+        // - [1] class (walker) name
+        // - [2] function name
+
+        const className = state.matches[1];
+        const functionName = 'go';
+
+        // Validate the classname
+        if (!this.#walkerDefinitions.has(className)) {
+            const startColumn = state.matches.indices[1][0];
+            const endColumn = state.matches.indices[1][1];
+            state = this.#addError(
+                state,
+                `A walker named '${className}' has not been defined`,
+                ErrorSeverity.Warning,
+                startColumn,
+                endColumn
+            );
+        }
+
+        // TODO: Validate the function name
+
+        state.setCodeBlockName(className, functionName);
+
         // Once a name is parsed, we no longer expect a
         // name, but we immediately expect a code block
         state.expectNamedCodeBlock = false;
