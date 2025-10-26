@@ -75,9 +75,9 @@
  * An object that holds metadata about the different
  * types of pragmas.
  * @typedef {Object} PragmasMetaData
- * @property {any[]} class
- * @property {Map<string,any>} walkers
- * 
+ * @property {any[]} class - Name of the main class to be generated
+ * @property {Map<string,any>} walkers - Metadata for defined walkers
+ * @property {string} defaultWalker - Name of the default walker
  */
 //#endregion
 
@@ -371,6 +371,7 @@ export class YantraParser {
     #pragmaParsers = {
         "class": this.#parsePragmaClass,
         "walkers": this.#parsePragmaWalkers,
+        "default_walker": this.#parsePragmaDefaultWalker,
         "members": this.#parsePragmaMembers
     };
 
@@ -416,7 +417,7 @@ export class YantraParser {
         this.#pragmas = {
             class: [],
             walkers: undefined,
-            members: []
+            defaultWalker: undefined
         };
 
         this.#tokenDefinitions = new Map();
@@ -792,8 +793,53 @@ export class YantraParser {
             pushDefinition(state, this.#walkerDefinitions, walkerName, startColumn, endColumn);
         }
 
+        // The first walker is considered the default walker
+        this.#pragmas.defaultWalker = paramsMatch[0][1];
+
         state.result = "Walkers pragma";
         return state
+    }
+
+    /** @type {PragmaParser} */
+    #parsePragmaDefaultWalker(state, pragma) {
+        const paramMatch = pragma.params
+            ? pragma.params.lexeme.match(ElementPattern.SpacedCppName)
+            : undefined;
+
+        if (!paramMatch) {
+            state = this.#addError(
+                state,
+                'The %default_walker pragma expects a single valid walker name as parameter'
+            );
+            return state;
+        }
+
+        if (!pragma.terminator) {
+            state = this.#addError(state, "A %default_walker pragma should end with a semicolon");
+            return state;
+        }
+
+        const walkerName = paramMatch[1];
+        const startColumn = pragma.params.range.start.character + paramMatch.indices[1][0];
+        const endColumn = startColumn + walkerName.length;
+
+        // Add a warning if the walker has not been defined
+        if (!this.#walkerDefinitions.has(walkerName)) {
+            state = this.#addError(
+                state,
+                `A walker called '${walkerName}' has not been defined`,
+                ErrorSeverity.Error,
+                startColumn,
+                endColumn
+            );
+            return state;
+        }
+
+        // Set the default walker name
+        this.#pragmas.defaultWalker = walkerName;
+
+        state.result = "default_walker pragma";
+        return state;
     }
 
     /** @type {PragmaParser} */
@@ -806,7 +852,7 @@ export class YantraParser {
         if (!paramMatch) {
             state = this.#addError(
                 state,
-                'The %members pragma expects a single valid C++ class name as parameter'
+                'The %members pragma expects a single valid walker name as parameter'
             );
             return state;
         }
@@ -822,7 +868,7 @@ export class YantraParser {
         // Add a warning if the mentioned walker has not been declared
         const walkerName = paramMatch[1];
         const startColumn = pragma.params.range.start.character + paramMatch.indices[1][0];
-        const endColumn = startColumn+walkerName.length;
+        const endColumn = startColumn + walkerName.length;
 
         if (!this.#pragmas.walkers?.has(walkerName)) {
             state = this.#addError(
@@ -836,7 +882,7 @@ export class YantraParser {
 
         // Add a warning if a members pragma already exists for this walker
         const membersDefinedForWalker = this.#pragmas.walkers?.get(walkerName);
-        if(membersDefinedForWalker) {
+        if (membersDefinedForWalker) {
             state = this.#addError(
                 state,
                 `Members have already been defined for a walker called '${walkerName}'`,
@@ -849,8 +895,8 @@ export class YantraParser {
         // For now, set the walker value to true, signifying members defined.
         this.#pragmas.walkers?.set(walkerName, true);
 
-        const memberspragmas = this.#pragmas['members'];
-        memberspragmas.push({ walkerName: paramMatch[1] });
+        // const memberspragmas = this.#pragmas['members'];
+        // memberspragmas.push({ walkerName: paramMatch[1] });
 
         state.expectCodeBlock = true;
         state.result = `Members pragma: walkername: ${paramMatch[1]}`;
