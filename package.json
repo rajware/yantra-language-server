@@ -3,7 +3,7 @@
   "displayName": "Yantra Language Server",
   "description": "Language Server Protocol (LSP) implementation for the Yantra grammar language",
   "version": "0.0.1",
-  "publisher": "your-publisher-id",
+  "publisher": "rajware",
   "license": "MIT",
   "engines": {
     "vscode": "^1.80.0"
