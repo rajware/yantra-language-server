@@ -45,6 +45,21 @@
  */
 
 /**
+ * The rule nonterminal
+ * @typedef {Object} Rule
+ * @property {LexicalToken} name
+ * @property {LexicalToken|null} defininition
+ * @property {LexicalToken|null} terminator;
+ */
+
+/**
+ * The ruledefelement nonterminal
+ * @typedef {Object} RuleDefElement
+ * @property {LexicalToken} element
+ * @property {LexicalToken|null} alias
+ */
+
+/**
  * The code block name nonterminal
  * @typedef {Object} CodeBlockName
  * @property {string} className
@@ -163,7 +178,8 @@ const ElementPattern = {
  */
 const RepeatedElementPattern = {
     CppNames: /\s*?(?:([a-zA-Z]\w*)\s*?)+/dg,
-    TokenNames: /\s*?(?:([A-Z][A-Z_]*)\s*?)+/dg
+    TokenNames: /\s*?(?:([A-Z][A-Z_]*)\s*?)+/dg,
+    RuleDefs: /\s*?(?:([a-zA-Z]\w*)\s*(?:\(([a-zA-Z]\w*)\))?\s*)+?/dg
 }
 
 Object.freeze(ErrorSeverity);
@@ -221,6 +237,21 @@ function matchRepeatingPattern(pragma, repeatingPattern) {
 }
 
 /**
+ * Checks if a lexical token contains a repeated pattern only. If so,
+ * returns a match array (matchAll). If not, returns null.
+ * @param {LexicalToken} lexicalToken 
+ * @param {RegExp} repeatingPattern
+ * @returns {RegExpExecArray[]|null}
+ */
+function matchRepeatingPatternInLexicalToken(lexicalToken, repeatingPattern) {
+    return !lexicalToken
+        ? undefined
+        : ensureOnly(repeatingPattern).test(lexicalToken.lexeme)
+            ? Array.from(lexicalToken.lexeme.matchAll(repeatingPattern))
+            : undefined
+}
+
+/**
  * Creates a lexical token from a scanner match of the current
  * line. 
  * @param {ParseState} state 
@@ -243,6 +274,28 @@ const lexicalTokenFromLine = (state, matchIndex) => {
 }
 
 /**
+ * Creates a lexical token from a scanner match, and offsets the range. 
+ * @param {RegExpExecArray} matches - A scanner match
+ * @param {Number} matchIndex - The index to be turned into a LexicalToken
+ * @param {Number} line - The line for the LexicalToken range
+ * @param {Number} characterOffset - The offset to adjust the match column
+ * @returns {LexicalToken|null}
+ */
+const lexicalTokenFromMatch = (matches, matchIndex, line, characterOffset = 0) => {
+    const match = matches[matchIndex];
+    if (!match) return null;
+
+    const indices = matches.indices[matchIndex];
+    return {
+        lexeme: match,
+        range: {
+            start: { line: line, character: indices[0] + characterOffset },
+            end: { line: line, character: indices[1] + characterOffset },
+        }
+    }
+}
+
+/**
  * 
  * @param {ParseState} state
  * @returns {Pragma}
@@ -255,6 +308,23 @@ const newPragma = (state) => {
     return {
         name: lexicalTokenFromLine(state, 1),
         params: lexicalTokenFromLine(state, 2),
+        terminator: lexicalTokenFromLine(state, 3)
+    }
+}
+
+/**
+ * 
+ * @param {ParseState} state
+ * @returns {Rule}
+ */
+const newRule = (state) => {
+    // The ruledef regexp returns:
+    // - [1] rule name
+    // - [2] the entire rule definition
+    // - [3] semicolon if present
+    return {
+        name: lexicalTokenFromLine(state, 1),
+        defininition: lexicalTokenFromLine(state, 2),
         terminator: lexicalTokenFromLine(state, 3)
     }
 }
@@ -452,14 +522,8 @@ export class YantraParser {
     #functionDefinitions;
     /** @type {Map<string, YantraDefinition[]} */
     #codeBlockDefinitions;
-    /** @type {Map<string>,Map<string, YantraDefinition[]>>} */
-    #definitionsMap = {
-        'token': () => this.#tokenDefinitions,
-        'rule': () => this.#ruleDefinitions,
-        'walker': () => this.#walkerDefinitions,
-        'function': () => this.#functionDefinitions,
-        'codeblock': () => this.#codeBlockDefinitions
-    };
+    /** @type {Map<string,() => Map<string, YantraDefinition[]>>} */
+    #definitionsMap;
 
     /** @type {ForwardReference[]} */
     #forwardReferences;
@@ -554,6 +618,14 @@ export class YantraParser {
         this.#walkerDefinitions = new Map();
         this.#functionDefinitions = new Map();
         this.#codeBlockDefinitions = new Map();
+
+        this.#definitionsMap = {
+            'token': this.#tokenDefinitions,
+            'rule': this.#ruleDefinitions,
+            'walker': this.#walkerDefinitions,
+            'function': this.#functionDefinitions,
+            'codeblock': this.#codeBlockDefinitions
+        };
 
         this.#forwardReferences = [];
         this.#errors = [];
@@ -760,7 +832,7 @@ export class YantraParser {
         // Create warnings for pending forward references
         for (let i = 0; i < this.#forwardReferences.length; i++) {
             const forwardRef = this.#forwardReferences[i];
-            const defs = this.#definitionsMap[forwardRef.type]();
+            const defs = this.#definitionsMap[forwardRef.type];
 
             // If definition type is not known, ignore it
             if (!defs) continue;
@@ -774,6 +846,9 @@ export class YantraParser {
                 );
             }
         }
+
+        // Clear forward references
+        this.#forwardReferences = [];
 
         this.#results = results;
     }
@@ -945,7 +1020,7 @@ export class YantraParser {
             return state;
         }
 
-        if(!pragma.terminator) {
+        if (!pragma.terminator) {
             state = this.#addError(
                 state,
                 'The %walkers pragma should end with a semicolon'
@@ -1266,18 +1341,111 @@ export class YantraParser {
         // - [1]rule name
         // - [2] rule definition
         // - [3] semicolon if present
-        const [, ruleName, ruledef, terminator] = state.matches;
 
-        // validate ruledef
-        const ruledefreg = /^\s*?(?:(?:([a-zA-Z]\w*?)\s*?)(?:\(([a-zA-Z]\w*?)\)\s*?)?)+$/
-        if (!ruledefreg.test(ruledef)) {
-            state = this.#addError(state, `Syntax error in rule definition: '${ruledef}'`);
+        // const [, ruleName, ruledef, terminator] = state.matches;
+        const rule = newRule(state);
+        const ruleName = rule.name.lexeme;
+
+        // // validate ruledef
+        // const ruledefreg = /^\s*?(?:(?:([a-zA-Z]\w*?)\s*?)(?:\(([a-zA-Z]\w*?)\)\s*?)?)+$/
+        // if (!ruledefreg.test(ruledef)) {
+        //     state = this.#addError(state, `Syntax error in rule definition: '${ruledef}'`);
+        //     return state;
+        // }
+        const paramsMatches = matchRepeatingPatternInLexicalToken(rule.defininition, RepeatedElementPattern.RuleDefs);
+        if (!paramsMatches) {
+            state = this.#addError(
+                state,
+                'Syntax error in rule definition'
+            );
             return state;
+        }
+
+        // Process rule definitions
+        const definitionsOffset = rule.defininition.range.start.character;
+
+        for (let i = 0; i < paramsMatches.length; i++) {
+            const ruleDefElement = {
+                element: lexicalTokenFromMatch(
+                    paramsMatches[i],
+                    1,
+                    state.lineNumber,
+                    definitionsOffset
+                ),
+                alias: lexicalTokenFromMatch(
+                    paramsMatches[i],
+                    2,
+                    state.lineNumber,
+                    definitionsOffset)
+            }
+
+            const elementName = ruleDefElement.element.lexeme;
+
+            // An element could be a Token
+            if (isYantraTokenName(elementName)) {
+                // Check that the alias, if present, is also a token
+                if (ruleDefElement.alias) {
+                    if (!isYantraTokenName(ruleDefElement.alias.lexeme)) {
+                        state = this.#addError(
+                            state,
+                            'The alias name for a token must match the casing of token names',
+                            ErrorSeverity.Error,
+                            ruleDefElement.alias.range.start.character,
+                            ruleDefElement.alias.range.end.character
+                        );
+                    }
+                }
+                // Look up the token name. If not found, add a forward
+                // reference.
+                if (!this.#tokenDefinitions.has(elementName)) {
+                    this.#addForwardReference(
+                        elementName,
+                        'token',
+                        ruleDefElement.element.range
+                    );
+                }
+
+                // Proceed to next definition element
+                continue;
+            }
+
+            // An element could be a Rule
+            if (isYantraRuleName(elementName)) {
+                // Check that the alias, if present, is also a token
+                if (ruleDefElement.alias) {
+                    if (!isYantraRuleName(ruleDefElement.alias.lexeme)) {
+                        state = this.#addError(
+                            state,
+                            'The alias name for a rule must match the casing of rule names',
+                            ErrorSeverity.Error,
+                            ruleDefElement.alias.range.start.character,
+                            ruleDefElement.alias.range.end.character
+                        );
+                    }
+                }
+
+                // If the rule name used is the same as the rule being
+                // defined, no need for a lookup or forward reference.
+                if(elementName === rule.name.lexeme) {
+                    continue;
+                }
+
+                // Look up the rule name. If not found, add a forward
+                // reference.
+                if (!this.#ruleDefinitions.has(elementName)) {
+                    this.#addForwardReference(
+                        elementName,
+                        'rule',
+                        ruleDefElement.element.range
+                    );
+                }
+            }
+
         }
 
         // A rule definition that does not end in a semicolon is expecting
         // a code block
-        if (!terminator) {
+        if (!rule.terminator) {
             // We will set a default name for the first code block, which
             // could be anonymous
             state.setCodeBlockName(this.#pragmas.defaultWalker, 'go');
@@ -1286,6 +1454,9 @@ export class YantraParser {
 
         // Push definintion
         pushNewDefinition(state, this.#ruleDefinitions, ruleName);
+
+        // Clear any forward references
+        this.#removeForwardReference(ruleName, 'rule');
 
         state.result = `Rule Definition := Rulename: ${ruleName}`;
         return state;
