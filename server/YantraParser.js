@@ -393,6 +393,18 @@ const newFunctionDefinition = (match, fdLine, fdOffset) => {
 }
 
 /**
+ * Creates a range spanning the current line
+ * @param {ParseState} state
+ * @returns {range}
+ */
+const fullLineRange = (state) => {
+    return {
+        start: {line: state.line, character: 0},
+        end: {line: state.line, character: state.lineText.length }
+    };
+}
+
+/**
  * Creates a definition from an element in the current line, or the entire line, and pushes
  * it to a definitions array
  * @param {ParseState} state
@@ -437,7 +449,9 @@ const pushDefinition = (definitions, definition) => {
  * Parser state in the current line.
  */
 class ParseState {
-    // Current line properties
+    // Current line properties.
+    // These reset per line.
+
     /**
      * The line currently being parsed.
      */
@@ -451,7 +465,23 @@ class ParseState {
      * @type {RegExpMatchArray | null}
      */
     #matches = [];
+    /**
+     * Errors encountered in the current line
+     * @type {YantraError[]}
+     */
+        /** @type {YantraError[]} */
+    #errors = [];
+    /**
+     * Definitions encountered in the current line
+     * @type {YantraDefinition[]}
+     */
+    #definitions = [];
+
     result = null;
+
+    // All properties after this represent
+    // state carried over multiple lines.
+    // They do NOT reset per line.
 
     // Document cumulative properties
     /**
@@ -537,6 +567,8 @@ class ParseState {
         this.#line = line;
         this.#lineText = lineText;
         this.#matches = [];
+        this.#errors = [];
+        this.#definitions = [];
     }
 
     /**
@@ -547,6 +579,35 @@ class ParseState {
     matchLine(lineSyntaxPattern) {
         this.#matches = this.#lineText.match(lineSyntaxPattern);
         return this.#matches;
+    }
+
+    /**
+     * Adds an error to the current line
+     * @param {string} message - The diagnotic message
+     * @param {ErrorSeverity} severity - The error severity. Default is Error.
+     * @param {Number} [startColumn] - The column on the current line where the diagnostic context begins. By default the start of the line.
+     * @param {Number} [endColumn] - The column on the current line where the diagnostic context ends. By default the end of the line.
+     */
+    addError(message, severity, startColumn, endColumn) {
+        startColumn = startColumn ?? 0;
+        endColumn = endColumn ?? this.#line.length;
+
+        this.#errors.push({
+            severity,
+            message,
+            range: {
+                start: {line: this.#line, character: startColumn},
+                end: {line: this.#line,character: endColumn}
+            }            
+        });
+    }
+
+    /**
+     * Adds a definition to the current line
+     * @param {YantraDefinition} def
+     */
+    addDefinition(def) {
+        this.#definitions.push(def);
     }
 
     /**
@@ -1419,7 +1480,7 @@ export class YantraParser {
         // - [5] semicolon if present
         const token = newYantraToken(state);
         const tokenName = token.name.lexeme;
-        // const [, tokenName, value, , terminator] = state.matches;
+        const node = new TokenNode(token, fullLineRange(state));
 
         if (!token.terminator) {
             state = this.#addError(state, "A token definition should end with a semicolon");
@@ -1427,7 +1488,8 @@ export class YantraParser {
         }
 
         // Push definition
-        pushNewDefinition(state, this.#tokenDefinitions, tokenName);
+        //pushNewDefinition(state, this.#tokenDefinitions, tokenName);
+        pushDefinition(this.#tokenDefinitions, node);
 
         // Remove any forward references for this token
         this.#removeForwardReference(tokenName, 'token');
@@ -1702,5 +1764,63 @@ export class YantraParser {
         this.#forwardReferences = this.#forwardReferences.filter(
             item => !(item.type === type && item.name === name)
         );
+    }
+}
+
+class ASTNode {
+    /** @type {string} */
+    #type;
+    /** @type {range} */
+    #range;
+
+    /** 
+     * @param {string} type
+     * @param {range} range
+     */
+    constructor(type, range) {
+        this.#type = type;
+        this.#range = range;
+    }
+
+    /**
+     * The type of node
+     * @type {string}
+     */
+    get type() {
+        return this.#type;
+    }
+
+    /**
+     * The name of the node, if any
+     * @type {string|null}
+     */
+    get name() {
+        return null;
+    }
+
+    /**
+     * The range of the node
+     */
+    get range() {
+        return this.#range;
+    }
+}
+
+class TokenNode extends ASTNode {
+    /** @type {YantraToken} */
+    #token;
+
+    /**
+     * Creates a Token AST Node
+     * @param {YantraToken} token
+     * @param {range} range
+     */
+    constructor(token, range) {
+        super('token', range);
+        this.#token = token;
+    }
+
+    get name() {
+        return this.#token.name.lexeme;
     }
 }
