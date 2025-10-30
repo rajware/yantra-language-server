@@ -274,7 +274,7 @@ const lexicalTokenFromMatch = (matches, matchIndex, line, characterOffset = 0) =
  * @param {Number} character 
  * @returns {boolean}
  */
-const isChracterInsideToken = (token, character) => {
+const isCharacterInsideToken = (token, character) => {
     if (character >= token.range.start.character &&
         character <= token.range.end.character) {
         return true;
@@ -568,10 +568,6 @@ class ParseState {
 export class YantraParser {
     /** @type {ParserStatus} */
     #status;
-    /** @type {string} */
-    #document;
-    /** @type {string[]} */
-    #lines;
     /** @type {ASTNode[]} */
     #astNodes;
     /** @type {Map<string, Map<string, YantraDefinition[]>>} */
@@ -641,8 +637,6 @@ export class YantraParser {
      * @returns {void}
      */
     clear() {
-        this.#document = "";
-        this.#lines = [];
         this.#astNodes = undefined;
 
         this.#definitionsMap = new Map([
@@ -660,21 +654,20 @@ export class YantraParser {
     }
 
     /**
-     * 
+     * Gets an appropriate list of definition ranges, sensitive to the context
+     * of the position.
      * @param {Number} line 
      * @param {Number} character 
      */
     getDefinitionsAt(line, character) {
         const defs = [];
 
-        if (line < 0 && line > this.#astNodes.length) {
-            return defs;
-        }
+        if(this.#status !== ParserStatus.Ready) return defs;
+
+        if (line < 0 || line > this.#astNodes.length) return defs;
 
         const node = this.#astNodes[line];
-        if (!node) {
-            return defs;
-        }
+        if (!node) return defs;
 
         const searchElement = node.getElementForDefinitionsAt(character);
         if (searchElement) {
@@ -701,30 +694,32 @@ export class YantraParser {
      * @returns {string}
      */
     parse(inputText) {
-        if (this.#document != inputText) {
-            this.#status = ParserStatus.Parsing;
-            this.clear();
-            this.#document = inputText;
-            this.#lines = this.#document.split(/\r?\n/);
-            this.#astNodes = new Array(this.#lines.length);
-            this.#parseLines();
-            this.#status = ParserStatus.Ready;
-        }
+        this.#status = ParserStatus.Parsing;
+        this.clear();
+        //this.#document = inputText;
+        const lines = inputText.split(/\r?\n/);
+        this.#astNodes = new Array(lines.length);
+        this.#parseLines(lines);
+        this.#status = ParserStatus.Ready;
 
         return this.#astNodes.map(item => item?.toString() ?? "Unknown").join("\n");
     }
 
-    #parseLines() {
+    /**
+     * 
+     * @param {string[]} lines 
+     */
+    #parseLines(lines) {
         let state = new ParseState({
             addErrorWithRange: this.#addErrorWithRange.bind(this),
-            addDefinition: this.#adddefinition.bind(this),
+            addDefinition: this.#addDefinition.bind(this),
             lookupDefinition: this.#lookupDefinition.bind(this),
             addForwardReference: this.#addForwardReference.bind(this),
             removeForwardReference: this.#removeForwardReference.bind(this)
         });
 
-        for (let i = 0; i < this.#lines.length; i++) {
-            const lineText = this.#lines[i];
+        for (let i = 0; i < lines.length; i++) {
+            const lineText = lines[i];
             state.startNewLine(i, lineText);
 
             const trimmedLine = lineText.trim();
@@ -1015,7 +1010,7 @@ export class YantraParser {
      * @param {ASTNode} def
      * @returns {void}
      */
-    #adddefinition(def) {
+    #addDefinition(def) {
         const defMap = this.#definitionsMap.get(def.type);
         if (defMap) {
             /** @type {YantraDefinition[]} */
@@ -1119,7 +1114,7 @@ class ASTNode {
      * that definitions can be fetched for it. If the node
      * is not suitable for definitions, returns null.
      * @param {Number} character
-     * @returns {ASTNode|null}
+     * @returns {{type: string, name: string}|null}
      */
     getElementForDefinitionsAt(character) {
         return null;
@@ -1406,7 +1401,7 @@ class DefaultWalkerPragmaNode extends PragmaNode {
     }
 
     getElementForDefinitionsAt(character) {
-        if (isChracterInsideToken(this.#walkerReferenceToken, character)) {
+        if (isCharacterInsideToken(this.#walkerReferenceToken, character)) {
             return { type: 'walker', name: this.#walkerReferenceToken.lexeme };
         }
 
@@ -1490,7 +1485,7 @@ class MembersPragmaNode extends PragmaNode {
 
     getElementForDefinitionsAt(character) {
         if (this.#walkerNameToken &&
-            isChracterInsideToken(this.#walkerNameToken, character)) {
+            isCharacterInsideToken(this.#walkerNameToken, character)) {
             return {
                 type: 'walker',
                 name: this.#walkerNameToken.lexeme
@@ -1566,7 +1561,7 @@ class AssociativityPragmaNode extends PragmaNode {
 
     getElementForDefinitionsAt(character) {
         const defObj = this.#tokenNameTokens?.find((ltoken) => {
-            return isChracterInsideToken(ltoken, character);
+            return isCharacterInsideToken(ltoken, character);
         });
 
         return defObj
@@ -1740,11 +1735,11 @@ class FunctionDefinitionNode extends ASTNode {
     }
 
     getElementForDefinitionsAt(character) {
-        if (isChracterInsideToken(this.#ruleNameToken, character)) {
+        if (isCharacterInsideToken(this.#ruleNameToken, character)) {
             return { type: 'rule', name: this.#ruleNameToken.lexeme };
         }
 
-        if (isChracterInsideToken(this.#walkerNameToken, character)) {
+        if (isCharacterInsideToken(this.#walkerNameToken, character)) {
             return { type: 'walker', name: this.#walkerNameToken.lexeme };
         }
 
@@ -1790,7 +1785,7 @@ class RuleNode extends ASTNode {
         return this.#nameToken.lexeme;
     }
 
-    get defininition() {
+    get definition() {
         return this.#definitionToken.lexeme;
     }
 
@@ -1919,7 +1914,7 @@ class RuleNode extends ASTNode {
 
     getElementForDefinitionsAt(character) {
         const rdef = this.#ruleDefElements?.find(
-            rdelement => isChracterInsideToken(rdelement.element, character)
+            rdelement => isCharacterInsideToken(rdelement.element, character)
         );
 
         if (rdef) {
@@ -2085,11 +2080,11 @@ class CodeBlockNameNode extends ASTNode {
     }
 
     getElementForDefinitionsAt(character) {
-        if (isChracterInsideToken(this.#classnameToken, character)) {
+        if (isCharacterInsideToken(this.#classnameToken, character)) {
             return { type: 'walker', name: this.#classnameToken.lexeme };
         }
 
-        if (isChracterInsideToken(this.#functionnameToken, character)) {
+        if (isCharacterInsideToken(this.#functionnameToken, character)) {
             return { type: 'function', name: this.name };
         }
 
