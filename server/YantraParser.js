@@ -131,7 +131,7 @@ const SyntaxPattern = {
     Pragma: /^\s*?%([a-z_]+)(?:\s+(.*?))?(;?)$/d,
     TokenDefinition: /^\s*?([A-Z][A-Z0-9_]*?)\s*?(:=)\s*?(".*?")(!)?\s*?(;)?\s*?$/d,
     RuleDefinition: /^\s*?([a-z][\w]*?)\s*?:=\s*?(.*?)(;)?\s*?$/d,
-    CodeBlockName: /^@(\w+)(?:::(\w+))?$/d
+    CodeBlockName: /^@(\w+)(?:::(\w+))?\s*?$/d
 }
 
 /**
@@ -512,8 +512,6 @@ export class YantraParser {
     #document;
     /** @type {string[]} */
     #lines;
-    /** @type {string[]} */
-    #results;
     /** @type {ASTNode[]} */
     #astNodes;
     /** @type {Map<string, Map<string, YantraDefinition[]>>} */
@@ -585,7 +583,6 @@ export class YantraParser {
     clear() {
         this.#document = "";
         this.#lines = [];
-        this.#results = [];
         this.#astNodes = undefined;
 
         this.#definitionsMap = new Map([
@@ -691,7 +688,6 @@ export class YantraParser {
     }
 
     #parseLines() {
-        const results = [];
         let state = new ParseState();
         state.globalState = {
             addError: this.#addError.bind(this),
@@ -712,11 +708,11 @@ export class YantraParser {
             if (state.inCodeBlock) {
                 if (trimmedLine === "%}") {
                     this.#astNodes[i] = this.#parseEndCodeBlock(state);
-                    results.push(state.result);
+
                     continue;
                 } else {
                     this.#astNodes[i] = state.currentCodeBlock;
-                    results.push("In Code Block");
+
                     continue;
                 }
             }
@@ -729,7 +725,7 @@ export class YantraParser {
                     state.matchLine(SyntaxPattern.CodeBlockName);
                     if (state.matches) {
                         this.#astNodes[i] = this.#parseCodeBlockName(state);
-                        results.push(state.result);
+
                         continue;
                     }
                 }
@@ -756,7 +752,7 @@ export class YantraParser {
                     state.expectCodeBlock = false;
                     // This is an error line
                     this.#astNodes[i] = undefined;
-                    results.push(state.result);
+
                     continue;
                 }
             }
@@ -764,15 +760,15 @@ export class YantraParser {
             switch (trimmedLine) {
                 case "":
                     this.#astNodes[i] = undefined;
-                    results.push("Empty");
+
                     break;
                 case "%{":
                     this.#astNodes[i] = this.#parseBeginCodeBlock(state);
-                    results.push(state.result);
+
                     break;
                 case "%}":
                     this.#astNodes[i] = this.#parseEndCodeBlock(state);
-                    results.push(state.result);
+
                     break;
                 default: {
                     let matched = false;
@@ -781,7 +777,7 @@ export class YantraParser {
                         state.matchLine(linePattern.pattern);
                         if (state.matches) {
                             this.#astNodes[i] = linePattern.action(state);
-                            results.push(state.result);
+
                             matched = true;
                             break;
                         }
@@ -789,7 +785,7 @@ export class YantraParser {
                     if (!matched) {
                         this.#addError(state, 'Syntax Error');
                         this.#astNodes[i] = undefined;
-                        results.push(state.result);
+
                     }
                     break;
                 }
@@ -798,7 +794,7 @@ export class YantraParser {
             // Stop parsing if too many errors
             if (state.errorCount > this.#errorThreshold) {
                 this.#addError(state, 'Too many errors. Parsing will stop');
-                results.push(state.result);
+
                 break;
             }
         }
@@ -822,8 +818,6 @@ export class YantraParser {
         }
         // Clear forward references
         this.#forwardReferences = [];
-
-        this.#results = results;
     }
 
     /**
@@ -850,12 +844,13 @@ export class YantraParser {
         //         end: undefined
         //     }
         // };
-        state.currentCodeBlock = new CodeBlockNode(state);
+        const codeBlock = new CodeBlockNode(state)
+        state.currentCodeBlock = codeBlock;
 
         state.inCodeBlock = true
         state.expectCodeBlock = false;
-        state.result = "Start Code Block";
-        return state.currentCodeBlock;
+
+        return codeBlock;
     }
 
     /**
@@ -1092,8 +1087,6 @@ export class YantraParser {
 
         this.#errors.push(newError);
         state.errorCount++;
-
-        state.result = `ERROR: ${message}`;
     }
 
     /**
@@ -1176,7 +1169,6 @@ export class YantraParser {
 
         return [];
     }
-
 }
 
 class ASTNode {
@@ -1269,17 +1261,10 @@ class TokenNode extends ASTNode {
         }
 
         // Push definition
-        //pushNewDefinition(state, this.#tokenDefinitions, tokenName);
         state.addDefinition(this);
-        //pushDefinition(this.#tokenDefinitions, node);
 
         // Remove any forward references for this token
         state.removeForwardReference(this.name, this.type);
-
-        // this.#removeForwardReference(tokenName, 'token');
-
-        state.result = `Token Definition :- Token: ${this.name}`;
-        return;
     }
 }
 
@@ -1365,9 +1350,6 @@ class ClassNamePragmaNode extends PragmaNode {
         }
 
         state.className = paramMatch[1];
-
-        state.result = `Class Pragma: className: ${state.className}`;
-        return;
     }
 }
 
@@ -1425,9 +1407,6 @@ class WalkersPragmaNode extends PragmaNode {
 
         // The first walker is considered the default walker
         state.defaultWalker = this.#walkers[0].name;
-
-        state.result = "Walkers pragma";
-        return state
     }
 }
 
@@ -1515,9 +1494,6 @@ class DefaultWalkerPragmaNode extends PragmaNode {
 
         // Set the default walker name
         state.defaultWalker = walkerName;
-
-        state.result = "default_walker pragma";
-        return;
     }
 }
 
@@ -1591,9 +1567,6 @@ class MembersPragmaNode extends PragmaNode {
         // A members pragma must be followed by an anonymous code 
         // block
         state.expectCodeBlock = true;
-
-        state.result = `Members pragma: walkername: ${walkerName}`;
-        return;
     }
 }
 
@@ -1657,9 +1630,6 @@ class AssociativityPragmaNode extends PragmaNode {
                 );
             }
         }
-
-        state.result = `%${this.name} pragma.`;
-        return;
     }
 }
 
@@ -1741,9 +1711,6 @@ class FunctionPragmaNode extends PragmaNode {
             'codeblock',
             funcdef.functionNameToken.range
         );
-
-        state.result = `%function pragma:${funcdef.name}`;
-        return;
     }
 }
 
@@ -1984,9 +1951,6 @@ class RuleNode extends ASTNode {
 
         // Clear any forward references
         state.removeForwardReference(this.name, 'rule');
-
-        state.result = `Rule Definition := Rulename: ${this.name}`;
-        return;
     }
 }
 
@@ -1997,8 +1961,8 @@ class CommentNode extends ASTNode {
 
     /** @type {NodeParser} */
     parse(state) {
-        state.result = 'Comment';
-        return state
+
+
     }
 }
 
@@ -2060,9 +2024,6 @@ class CodeBlockNode extends ASTNode {
         if (state.inRuleDef) {
             state.expectNamedCodeBlock = true;
         }
-
-        state.result = `End Code Block: ${this.name}`;
-        return state
     }
 }
 
@@ -2138,8 +2099,5 @@ class CodeBlockNameNode extends ASTNode {
         // name, but we immediately expect a code block
         state.expectNamedCodeBlock = false;
         state.expectCodeBlock = true;
-
-        state.result = "Code Block Name";
-        return state
     }
 }
