@@ -37,32 +37,6 @@
  */
 
 /**
- * The pragma nonteriminal
- * @typedef {Object} Pragma
- * @property {LexicalToken} name
- * @property {LexicalToken|null} params
- * @property {LexicalToken|null} terminator
- */
-
-/**
- * The token nonterminal
- * @typedef {Object} YantraToken
- * @property {LexicalToken} name
- * @property {LexicalToken} assignmentOperator
- * @property {LexicalToken} value
- * @property {LexicalToken|null} negator
- * @property {LexicalToken|null} terminator
- */
-
-/**
- * The rule nonterminal
- * @typedef {Object} Rule
- * @property {LexicalToken} name
- * @property {LexicalToken|null} defininition
- * @property {LexicalToken|null} terminator;
- */
-
-/**
  * The ruledefelement nonterminal
  * @typedef {Object} RuleDefElement
  * @property {LexicalToken} element
@@ -77,29 +51,20 @@
  */
 
 /**
- * A parser function
+ * A line parser function
  * @callback LineParser
  * @this {YantraParser}
  * @param {ParseState} state
- * @returns {ParseState}
+ * @returns {ASTNode|undefined}
  */
 
 /**
  * A parser function in an AST Node
  * @callback NodeParser
  * @param {ParseState} state
- * @returns {ParseState}
+ * @returns {void}
  */
 
-
-/**
- * A pragma parser function
- * @callback PragmaParser
- * @this {YantraParser}
- * @param {ParseState} state
- * @param {Pragma} pragma
- * @returns {ParseState}
- */
 
 /**
  * A forward reference to a token or rule
@@ -117,28 +82,6 @@
  * @property {RegExp} pattern
  * @property {LineParser} action
  */
-
-/**
- * A function definition nonterminal, the param of a %function pragma
- * @typedef {Object} FunctionDefinition
- * @property {LexicalToken} ruleName
- * @property {LexicalToken|null} walkerName
- * @property {LexicalToken} functionName
- * @property {LexicalToken} allParams
- * @property {LexicalToken} returnType
- * @property {LexicalToken} terminator
- */
-
-
-/**
-     * Adds a forward reference
-     * @callback AddFor
-     * @param {string} name - The name of the element being forward-referenced
-     * @param {string} type - The type of the element being forward-referenced
-     * @param {range} range - The range of the element which references the named element
-     */
-
-
 
 /**
  * @typedef {Object} GlobalState
@@ -472,7 +415,6 @@ class ParseState {
     addError(message, severity = ErrorSeverity.Error, startColumn, endColumn) {
         const self = this;
         this.globalState.addError(self, message, severity, startColumn, endColumn);
-        return this;
         // startColumn = startColumn ?? 0;
         // endColumn = endColumn ?? this.#line.length;
 
@@ -797,11 +739,11 @@ export class YantraParser {
             // is not a block begin, that's the error. 
             if (state.expectCodeBlock) {
                 if (trimmedLine !== "%{") {
-                    state = this.#addError(state, 'a code block was expected');
+                    this.#addError(state, 'a code block was expected');
 
                     if (state.inRuleDef) {
                         // TODO: check this
-                        state = this.#addError(
+                        this.#addError(
                             state,
                             'Rule definition should be followed by a semicolon or a code block',
                             ErrorSeverity.Error,
@@ -845,7 +787,7 @@ export class YantraParser {
                         }
                     }
                     if (!matched) {
-                        state = this.#addError(state, 'Syntax Error');
+                        this.#addError(state, 'Syntax Error');
                         this.#astNodes[i] = undefined;
                         results.push(state.result);
                     }
@@ -855,7 +797,7 @@ export class YantraParser {
 
             // Stop parsing if too many errors
             if (state.errorCount > this.#errorThreshold) {
-                state = this.#addError(state, 'Too many errors. Parsing will stop');
+                this.#addError(state, 'Too many errors. Parsing will stop');
                 results.push(state.result);
                 break;
             }
@@ -870,7 +812,7 @@ export class YantraParser {
             if (!defs) continue;
 
             if (!defs.has(forwardRef.name)) {
-                state = this.#addErrorWithRange(
+                this.#addErrorWithRange(
                     state,
                     `The ${forwardRef.type} '${forwardRef.name}' has not been defined`,
                     ErrorSeverity.Warning,
@@ -890,7 +832,7 @@ export class YantraParser {
      */
     #parseBeginCodeBlock(state) {
         if (!state.expectCodeBlock) {
-            state = this.#addError(state, 'Unexpected start of code block');
+            this.#addError(state, 'Unexpected start of code block');
             return undefined;
         }
 
@@ -922,12 +864,12 @@ export class YantraParser {
      */
     #parseEndCodeBlock(state) {
         if (!state.inCodeBlock) {
-            state = this.#addError(state, "Unexpected end of code block");
+            this.#addError(state, "Unexpected end of code block");
             return undefined;
         }
 
         const currentCodeBlock = state.currentCodeBlock;
-        state = state.currentCodeBlock.parse(state);
+        state.currentCodeBlock.parse(state);
         return currentCodeBlock;
         // state.currentCodeBlock.range.end = {
         // line: state.line,
@@ -952,7 +894,7 @@ export class YantraParser {
         // }
 
         // state.result = "End Code Block";
-        // return state;
+        // return /* state */;
     }
 
     /**
@@ -961,7 +903,7 @@ export class YantraParser {
     #parseComment(state) {
         const node = new CommentNode(state);
 
-        state = node.parse(state);
+        node.parse(state);
         return node;
     }
 
@@ -1005,17 +947,17 @@ export class YantraParser {
         if (!pragmaNode) {
             const startColumn = state.matches.indices[1][0];
             const endColumn = state.matches.indices[1][1];
-            state = this.#addError(
+            this.#addError(
                 state,
                 `Unknown pragma '${pragmaName}'`,
                 ErrorSeverity.Error,
                 startColumn,
                 endColumn
             );
-            return state;
+            return undefined;
         }
 
-        state = pragmaNode.parse(state);
+        pragmaNode.parse(state);
         return pragmaNode;
     }
 
@@ -1027,7 +969,7 @@ export class YantraParser {
         }
 
         const node = new TokenNode(state);
-        state = node.parse(state);
+        node.parse(state);
         return node;
     }
 
@@ -1043,7 +985,7 @@ export class YantraParser {
 
         const node = new RuleNode(state);
 
-        state = node.parse(state);
+        node.parse(state);
         return node;
     }
 
@@ -1053,7 +995,7 @@ export class YantraParser {
      */
     #parseCodeBlockName(state) {
         if (!state.inRuleDef) {
-            state = this.#addError(
+            this.#addError(
                 state,
                 'Named code block unexpected'
             );
@@ -1061,7 +1003,7 @@ export class YantraParser {
         }
 
         const node = new CodeBlockNameNode(state);
-        state = node.parse(state);
+        node.parse(state);
         return node;
         // // The codeblockname regexp returns
         // // - [1] class (walker) name
@@ -1073,7 +1015,7 @@ export class YantraParser {
         // if (!this.#walkerDefinitions.has(className)) {
         //     const startColumn = state.matches.indices[1][0];
         //     const endColumn = state.matches.indices[1][1];
-        //     state = this.#addError(
+        //     /* state = */ this.#addError(
         //         state,
         //         `A walker named '${className}' has not been defined`,
         //         ErrorSeverity.Warning,
@@ -1090,7 +1032,7 @@ export class YantraParser {
         //         const startColumn = state.matches.indices[1][0];
         //         const endColumn = state.matches.indices[1][1];
 
-        //         state = this.#addError(
+        //         /* state = */ this.#addError(
         //             state,
         //             `A function called ${functionName} has not been defined for the walker ${className} and the rule ${state.ruleDefName}`,
         //             ErrorSeverity.Warning,
@@ -1120,10 +1062,9 @@ export class YantraParser {
      * @param {Number} [startColumn] - The column on the current line where the diagnostic context begins. By default the start of the line.
      * @param {Number} [endColumn] - The column on the current line where the diagnostic context ends. By default the end of the line.
      * @param {Number} [endRow] - The line number where the diagnostic context ends. By default the current line number.
-     * @returns {ParseState}
      */
     #addError(state, message, severity = ErrorSeverity.Error, startColumn, endColumn, endRow) {
-        return this.#addErrorWithRange(
+        this.#addErrorWithRange(
             state,
             message,
             severity,
@@ -1141,7 +1082,6 @@ export class YantraParser {
      * @param {string} message - The diagnotic message
      * @param {ErrorSeverity} severity - The error severity. Default is Error.
      * @param {range} [range] - The range of the diagnostic context.
-     * @returns {ParseState}
      */
     #addErrorWithRange(state, message, severity = ErrorSeverity.Error, range) {
         const newError = {
@@ -1154,7 +1094,6 @@ export class YantraParser {
         state.errorCount++;
 
         state.result = `ERROR: ${message}`;
-        return state;
     }
 
     /**
@@ -1300,16 +1239,6 @@ class TokenNode extends ASTNode {
     #terminator; //: lexicalTokenFromLine(state, 5)
 
     /**
-     * Creates a Token AST Node
-     * @param {YantraToken} token
-     * @param {range} range
-     */
-    // constructor(token, range) {
-    //     super('token', range);
-    //     this.#token = token;
-    // }
-
-    /**
      * @param {ParseState} state
      */
     constructor(state) {
@@ -1335,8 +1264,8 @@ class TokenNode extends ASTNode {
     /** @type {NodeParser} */
     parse(state) {
         if (!this.#terminator) {
-            state = state.addError(state, "A token definition should end with a semicolon");
-            return state;
+            state.addError('A token definition should end with a semicolon');
+            return;
         }
 
         // Push definition
@@ -1350,7 +1279,7 @@ class TokenNode extends ASTNode {
         // this.#removeForwardReference(tokenName, 'token');
 
         state.result = `Token Definition :- Token: ${this.name}`;
-        return state;
+        return;
     }
 }
 
@@ -1406,17 +1335,15 @@ class ClassNamePragmaNode extends PragmaNode {
     }
 
     /**
-     * 
-     * @param {ParseState} state 
-     * @returns {ParseState}
+     * @type {NodeParser}
      */
     parse(state) {
         // Check if class pragma has already appeared
         if (state.className) {
-            state = state.addError(
+            state.addError(
                 'A %class pragma has already been specified'
             );
-            return state;
+            return;
         }
 
         // Check for parameter validity
@@ -1425,22 +1352,22 @@ class ClassNamePragmaNode extends PragmaNode {
             ? paramsToken.lexeme.match(ElementPattern.SpacedCppName)
             : undefined;
         if (!paramMatch) {
-            state = state.addError(
+            state.addError(
                 'The %class pragma expects a single valid C++ class name as parameter'
             );
-            return state;
+            return;
         }
 
         // Check for terminator
         if (!this.terminatorToken) {
-            state = state.addError(state, 'A %class pragma should end with a semicolon');
-            return state;
+            state.addError('A %class pragma should end with a semicolon');
+            return;
         }
 
         state.className = paramMatch[1];
 
         state.result = `Class Pragma: className: ${state.className}`;
-        return state
+        return;
     }
 }
 
@@ -1457,28 +1384,27 @@ class WalkersPragmaNode extends PragmaNode {
     parse(state) {
         // Check if walkers pragma has already appeared
         if (state.walkersPragmaDefined) {
-            state = state.addError(
+            state.addError(
                 'A %walkers pragma has already been specified'
             );
-            return state;
+            return;
         }
 
         // Check parameters
         const paramsMatch = this._matchRepeatingPattern(RepeatedElementPattern.CppNames);
 
         if (!paramsMatch || paramsMatch.length === 0) {
-            state = state.addError(
+            state.addError(
                 'The %walkers pragma expects one or more valid C++ class names separated by spaces'
             );
-            return state;
+            return;
         }
 
         if (!this.terminatorToken) {
-            state = state.addError(
-                state,
+            state.addError(
                 'The %walkers pragma should end with a semicolon'
             );
-            return state;
+            return;
         }
 
         const paramsOffset = this.paramsToken.range.start.character;
@@ -1550,15 +1476,15 @@ class DefaultWalkerPragmaNode extends PragmaNode {
             : undefined;
 
         if (!paramMatch) {
-            state = state.addError(
+            state.addError(
                 'The %default_walker pragma expects a single valid walker name as parameter'
             );
-            return state;
+            return;
         }
 
         if (!this.terminatorToken) {
-            state = state.addError('A %default_walker pragma should end with a semicolon');
-            return state;
+            state.addError('A %default_walker pragma should end with a semicolon');
+            return;
         }
 
         const walkerNameToken = lexicalTokenFromMatch(
@@ -1576,13 +1502,13 @@ class DefaultWalkerPragmaNode extends PragmaNode {
 
         // Add an error if the walker has not been defined
         if (!state.lookupDefinition(walkerReferenceNode)) {
-            state = state.addError(
+            state.addError(
                 `A walker called '${walkerNameToken.lexeme}' has not been defined`,
                 ErrorSeverity.Error,
                 startColumn,
                 endColumn
             );
-            return state;
+            return;
         }
 
         this.#walkerReferenceNode = walkerReferenceNode;
@@ -1591,7 +1517,7 @@ class DefaultWalkerPragmaNode extends PragmaNode {
         state.defaultWalker = walkerName;
 
         state.result = "default_walker pragma";
-        return state;
+        return;
     }
 }
 
@@ -1609,17 +1535,17 @@ class MembersPragmaNode extends PragmaNode {
             : undefined;
 
         if (!paramMatch) {
-            state = state.addError(
+            state.addError(
                 'The %members pragma expects a single valid walker name as parameter'
             );
-            return state;
+            return;
         }
 
         if (this.terminatorToken) {
-            state = state.addError(
+            state.addError(
                 'The %members pragma should be followed by a code block, not a semicolon'
             );
-            return state;
+            return;
         }
 
         // Add a warning if the mentioned walker has not been declared
@@ -1636,7 +1562,7 @@ class MembersPragmaNode extends PragmaNode {
         const endColumn = walkerNameToken.range.end.character;
 
         if (!state.lookupDefinition(walkerReferenceNode)) {
-            state = state.addError(
+            state.addError(
                 `A walker called '${walkerName}' has not been defined`,
                 ErrorSeverity.Warning,
                 startColumn,
@@ -1647,7 +1573,7 @@ class MembersPragmaNode extends PragmaNode {
         // Add a warning if a members pragma already exists for this walker
         // const membersDefinedForWalker = this.#pragmas.walkers?.get(walkerName);
         // if (membersDefinedForWalker) {
-        //     state = this.#addError(
+        //     /* state = */ this.#addError(
         //         state,
         //         `Members have already been defined for a walker called '${walkerName}'`,
         //         ErrorSeverity.Warning,
@@ -1667,7 +1593,7 @@ class MembersPragmaNode extends PragmaNode {
         state.expectCodeBlock = true;
 
         state.result = `Members pragma: walkername: ${walkerName}`;
-        return state;
+        return;
     }
 }
 
@@ -1685,11 +1611,10 @@ class AssociativityPragmaNode extends PragmaNode {
         // Check parameters
         const paramsMatch = this._matchRepeatingPattern(RepeatedElementPattern.TokenNames);
         if (!paramsMatch || paramsMatch.length === 0) {
-            state = state.addError(
-                state,
+            state.addError(
                 `The %${this.name} pragma expects one or more valid token names`
             );
-            return state;
+            return;
         }
 
         for (let i = 0; i < paramsMatch.length; i++) {
@@ -1715,8 +1640,7 @@ class AssociativityPragmaNode extends PragmaNode {
 
             // The token should not be defined at this point
             if (state.lookupDefinition(tokDef)) {
-                state = state.addError(
-                    state,
+                state.addError(
                     `The %${this.name} should appear before the definition of the token ${tokenName}`,
                     ErrorSeverity.Warning,
                     startColumn,
@@ -1735,7 +1659,7 @@ class AssociativityPragmaNode extends PragmaNode {
         }
 
         state.result = `%${this.name} pragma.`;
-        return state;
+        return;
     }
 }
 
@@ -1749,18 +1673,18 @@ class FunctionPragmaNode extends PragmaNode {
     /** @type {NodeParser} */
     parse(state) {
         if (!this.paramsToken) {
-            state = state.addError(
+            state.addError(
                 'The %function pragma requires a rule and a function definition'
             );
-            return state;
+            return;
         }
 
         const paramsMatch = this.paramsToken.lexeme.match(ElementPattern.FunctionDefinition);
         if (!paramsMatch) {
-            state = state.addError(
+            state.addError(
                 'The %function pragma requires a rule and a function definition in the format: RULENAME FUNCTIONNAME(PARAMS) -> RETURNTYPE;'
             );
-            return state;
+            return;
         }
 
         const funcdef = new FunctionDefinitionNode(paramsMatch, state.line, this.paramsToken.range.start.character, state.defaultWalker);
@@ -1770,13 +1694,13 @@ class FunctionPragmaNode extends PragmaNode {
             if (!state.lookupDefinition({ type: 'walker', name: funcdef.walkerName })) {
                 const startColumn = funcdef.walkerNameToken.range.start.character;
                 const endColumn = funcdef.walkerNameToken.range.end.character;
-                state = state.addError(
+                state.addError(
                     `A walker called ${funcdef.walkerName} has not been defined`,
                     ErrorSeverity.Error,
                     startColumn,
                     endColumn
                 );
-                return state;
+                return;
             }
         }
 
@@ -1785,20 +1709,20 @@ class FunctionPragmaNode extends PragmaNode {
         const funcNameEndColumn = funcdef.functionNameToken.range.end.character; //funcNameStartColumn + funcdef.functionName.length;
 
         if (state.lookupDefinition(funcdef)) {
-            state = state.addError(
+            state.addError(
                 `A function called ${funcdef.functionName} has already been defined for the walker ${funcdef.walkerName} and the rule ${funcdef.ruleName}`,
                 ErrorSeverity.Error,
                 funcNameStartColumn,
                 funcNameEndColumn
             );
-            return state;
+            return;
         }
 
         if (!this.terminatorToken) {
-            state = state.addError(
+            state.addError(
                 'The %function pragma should end with a semicolon'
             )
-            return state;
+            return;
         }
 
         // Push definition
@@ -1819,7 +1743,7 @@ class FunctionPragmaNode extends PragmaNode {
         );
 
         state.result = `%function pragma:${funcdef.name}`;
-        return state;
+        return;
     }
 }
 
@@ -1951,10 +1875,10 @@ class RuleNode extends ASTNode {
         );
 
         if (!paramsMatches) {
-            state = state.addError(
+            state.addError(
                 'Syntax error in rule definition'
             );
-            return state;
+            return;
         }
 
         // Process rule definitions
@@ -1989,7 +1913,7 @@ class RuleNode extends ASTNode {
                 // Check that the alias, if present, is also token name compliant
                 if (ruleDefElement.alias) {
                     if (!isYantraTokenName(ruleDefElement.alias.lexeme)) {
-                        state = state.addError(
+                        state.addError(
                             'The alias name for a token must match the casing of token names',
                             ErrorSeverity.Error,
                             ruleDefElement.alias.range.start.character,
@@ -2017,7 +1941,7 @@ class RuleNode extends ASTNode {
                 // Check that the alias, if present, is also rule name compliant
                 if (ruleDefElement.alias) {
                     if (!isYantraRuleName(ruleDefElement.alias.lexeme)) {
-                        state = state.addError(
+                        state.addError(
                             'The alias name for a rule must match the casing of rule names',
                             ErrorSeverity.Error,
                             ruleDefElement.alias.range.start.character,
@@ -2062,7 +1986,7 @@ class RuleNode extends ASTNode {
         state.removeForwardReference(this.name, 'rule');
 
         state.result = `Rule Definition := Rulename: ${this.name}`;
-        return state;
+        return;
     }
 }
 
@@ -2183,7 +2107,7 @@ class CodeBlockNameNode extends ASTNode {
         if (!state.lookupDefinition({ type: 'walker', name: this.className })) {
             const startColumn = this.#classnameToken.range.start.character;
             const endColumn = this.#classnameToken.range.end.character;
-            state = state.addError(
+            state.addError(
                 `A walker named '${this.className}' has not been defined`,
                 ErrorSeverity.Warning,
                 startColumn,
@@ -2199,7 +2123,7 @@ class CodeBlockNameNode extends ASTNode {
                 const startColumn = this.#functionnameToken.range.start.character;
                 const endColumn = this.#functionnameToken.range.end.character;
 
-                state = state.addError(
+                state.addError(
                     `A function called ${this.functionName} has not been defined for the walker ${this.className} and the rule ${state.ruleDefName}`,
                     ErrorSeverity.Warning,
                     startColumn,
