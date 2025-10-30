@@ -315,23 +315,6 @@ const lexicalTokenFromMatch = (matches, matchIndex, line, characterOffset = 0) =
 }
 
 /**
- * 
- * @param {ParseState} state
- * @returns {Rule}
- */
-const newRule = (state) => {
-    // The ruledef regexp returns:
-    // - [1] rule name
-    // - [2] the entire rule definition
-    // - [3] semicolon if present
-    return {
-        name: lexicalTokenFromLine(state, 1),
-        defininition: lexicalTokenFromLine(state, 2),
-        terminator: lexicalTokenFromLine(state, 3)
-    }
-}
-
-/**
  * Creates a range spanning the current line
  * @param {ParseState} state
  * @returns {range}
@@ -341,47 +324,6 @@ const fullLineRange = (state) => {
         start: { line: state.line, character: 0 },
         end: { line: state.line, character: state.lineText.length }
     };
-}
-
-/**
- * Creates a definition from an element in the current line, or the entire line, and pushes
- * it to a definitions array
- * @param {ParseState} state
- * @param {YantraDefinition[]} definitions - A definitions array
- * @param {string} name - The name of the element being defined
- * @param {Number} [startColumn] - The start column of the element. Default 0.
- * @param {Number} [endColumn] - The end column of the element. Default line length.
- * @returns {YantraDefinition}
- */
-const pushNewDefinition = (state, definitions, name, startColumn, endColumn) => {
-    const range = {
-        start: { line: state.line, character: startColumn ?? 0 },
-        end: { line: state.line, character: endColumn ?? state.lineText.length },
-    };
-
-    //return pushDefinitionWithRange(definitions, name, defRange);
-    return pushDefinition(definitions, { name, range });
-}
-
-/**
- * Pushes an already constructed definition to a definitions array
- * @param {Map<string,YantraDefinition[]>} definitions 
- * @param {YantraDefinition} definition 
- * @returns 
- */
-const pushDefinition = (definitions, definition) => {
-    /** @type {YantraDefinition[]} */
-    let defs;
-
-    if (definitions.has(definition.name)) {
-        defs = definitions.get(definition.name);
-    } else {
-        defs = [];
-        definitions.set(definition.name, defs);
-    }
-
-    defs.push(definition);
-    return definition;
 }
 //#endregion
 
@@ -405,17 +347,6 @@ class ParseState {
      * @type {RegExpMatchArray | null}
      */
     #matches = [];
-    /**
-     * Errors encountered in the current line
-     * @type {YantraError[]}
-     */
-    /** @type {YantraError[]} */
-    #errors = [];
-    /**
-     * Definitions encountered in the current line
-     * @type {YantraDefinition[]}
-     */
-    #definitions = [];
 
     result = null;
 
@@ -448,7 +379,7 @@ class ParseState {
     inCodeBlock = false;
     /**
      * The current code block
-     * @type {YantraDefinition}
+     * @type {ASTNode}
      */
     currentCodeBlock;
     /**
@@ -519,8 +450,6 @@ class ParseState {
         this.#line = line;
         this.#lineText = lineText;
         this.#matches = [];
-        this.#errors = [];
-        this.#definitions = [];
     }
 
     /**
@@ -575,7 +504,7 @@ class ParseState {
     }
 
     /**
-     * 
+     * Adds a forward reference for the given name and type.
      * @param {string} name 
      * @param {string} type 
      * @param {range} range 
@@ -585,7 +514,7 @@ class ParseState {
     }
 
     /**
-     * 
+     * Removes any forward references for the given name and type.
      * @param {string} name 
      * @param {string} type 
      * @param {range} range 
@@ -593,6 +522,7 @@ class ParseState {
     removeForwardReference(name, type) {
         this.globalState.removeForwardReference(name, type);
     }
+
     /**
      * Set a name for the next code block
      * @param {string} className - Name of a walker, by default the default walker
@@ -774,38 +704,19 @@ export class YantraParser {
         const result = [];
 
         if (isYantraTokenName(word)) {
-            const results = this.#searchDefs('token', word);
+            const results = this.#searchDefinitions('token', word);
             result.push(...results);
         }
 
         if (isYantraRuleName(word)) {
-            const results = this.#searchDefs('rule', word);
+            const results = this.#searchDefinitions('rule', word);
             result.push(...results);
         }
 
-        const results = this.#searchDefs('walker', word);
+        const results = this.#searchDefinitions('walker', word);
         result.push(...results);
 
         return result
-    }
-
-    /**
-     * Searches for definitions of the given type. If found
-     * returns and array of ranges where found.
-     * @param {string>} lookupType
-     * @param {string} word
-     * @returns {range[]}
-     */
-    #searchDefs(lookupType, word) {
-        /** @type {Map<string, YantraDefinition[]>} */
-        const map = this.#definitionsMap.get(lookupType)
-        if (map.has(word)) {
-            const defs = map.get(word);
-            const definitions = defs.map(def => def.range);
-            return definitions;
-        }
-
-        return [];
     }
 
     /**
@@ -834,7 +745,7 @@ export class YantraParser {
             this.#status = ParserStatus.Ready;
         }
 
-        return this.#results.join("\n");
+        return this.#astNodes.map(item => item?.toString() ?? "Unknown").join("\n");
     }
 
     #parseLines() {
@@ -858,10 +769,11 @@ export class YantraParser {
             // everything else as a non-error.
             if (state.inCodeBlock) {
                 if (trimmedLine === "%}") {
-                    state = this.#parseEndCodeBlock(state);
+                    this.#astNodes[i] = this.#parseEndCodeBlock(state);
                     results.push(state.result);
                     continue;
                 } else {
+                    this.#astNodes[i] = state.currentCodeBlock;
                     results.push("In Code Block");
                     continue;
                 }
@@ -874,7 +786,7 @@ export class YantraParser {
                 if (trimmedLine.charAt(0) === '@') {
                     state.matchLine(SyntaxPattern.CodeBlockName);
                     if (state.matches) {
-                        state = this.#parseCodeBlockName(state);
+                        this.#astNodes[i] = this.#parseCodeBlockName(state);
                         results.push(state.result);
                         continue;
                     }
@@ -888,6 +800,7 @@ export class YantraParser {
                     state = this.#addError(state, 'a code block was expected');
 
                     if (state.inRuleDef) {
+                        // TODO: check this
                         state = this.#addError(
                             state,
                             'Rule definition should be followed by a semicolon or a code block',
@@ -899,6 +812,8 @@ export class YantraParser {
                     }
 
                     state.expectCodeBlock = false;
+                    // This is an error line
+                    this.#astNodes[i] = undefined;
                     results.push(state.result);
                     continue;
                 }
@@ -906,14 +821,15 @@ export class YantraParser {
 
             switch (trimmedLine) {
                 case "":
+                    this.#astNodes[i] = undefined;
                     results.push("Empty");
                     break;
                 case "%{":
-                    state = this.#parseBeginCodeBlock(state);
+                    this.#astNodes[i] = this.#parseBeginCodeBlock(state);
                     results.push(state.result);
                     break;
                 case "%}":
-                    state = this.#parseEndCodeBlock(state);
+                    this.#astNodes[i] = this.#parseEndCodeBlock(state);
                     results.push(state.result);
                     break;
                 default: {
@@ -922,7 +838,7 @@ export class YantraParser {
                         const linePattern = this.#linePatterns[j];
                         state.matchLine(linePattern.pattern);
                         if (state.matches) {
-                            state = linePattern.action(state);
+                            this.#astNodes[i] = linePattern.action(state);
                             results.push(state.result);
                             matched = true;
                             break;
@@ -930,6 +846,7 @@ export class YantraParser {
                     }
                     if (!matched) {
                         state = this.#addError(state, 'Syntax Error');
+                        this.#astNodes[i] = undefined;
                         results.push(state.result);
                     }
                     break;
@@ -974,7 +891,7 @@ export class YantraParser {
     #parseBeginCodeBlock(state) {
         if (!state.expectCodeBlock) {
             state = this.#addError(state, 'Unexpected start of code block');
-            return state;
+            return undefined;
         }
 
         // Code block names are a combination of the following elements:
@@ -996,7 +913,7 @@ export class YantraParser {
         state.inCodeBlock = true
         state.expectCodeBlock = false;
         state.result = "Start Code Block";
-        return state
+        return state.currentCodeBlock;
     }
 
     /**
@@ -1006,11 +923,12 @@ export class YantraParser {
     #parseEndCodeBlock(state) {
         if (!state.inCodeBlock) {
             state = this.#addError(state, "Unexpected end of code block");
-            return state;
+            return undefined;
         }
 
+        const currentCodeBlock = state.currentCodeBlock;
         state = state.currentCodeBlock.parse(state);
-        return state;
+        return currentCodeBlock;
         // state.currentCodeBlock.range.end = {
         // line: state.line,
         //     character: 0
@@ -1044,7 +962,7 @@ export class YantraParser {
         const node = new CommentNode(state);
 
         state = node.parse(state);
-        return state;
+        return node;
     }
 
     /**
@@ -1098,7 +1016,7 @@ export class YantraParser {
         }
 
         state = pragmaNode.parse(state);
-        return state;
+        return pragmaNode;
     }
 
     /** @type {LineParser} */
@@ -1110,7 +1028,7 @@ export class YantraParser {
 
         const node = new TokenNode(state);
         state = node.parse(state);
-        return state;
+        return node;
     }
 
     /**
@@ -1126,7 +1044,7 @@ export class YantraParser {
         const node = new RuleNode(state);
 
         state = node.parse(state);
-        return state;
+        return node;
     }
 
     /**
@@ -1139,12 +1057,12 @@ export class YantraParser {
                 state,
                 'Named code block unexpected'
             );
-            return state;
+            return undefined;
         }
 
         const node = new CodeBlockNameNode(state);
         state = node.parse(state);
-        return state;
+        return node;
         // // The codeblockname regexp returns
         // // - [1] class (walker) name
         // // - [2] function name
@@ -1272,7 +1190,18 @@ export class YantraParser {
     #adddefinition(def) {
         const defMap = this.#definitionsMap.get(def.type);
         if (defMap) {
-            pushDefinition(defMap, def)
+            /** @type {YantraDefinition[]} */
+            let defs;
+
+            if (defMap.has(def.name)) {
+                defs = defMap.get(def.name);
+            } else {
+                defs = [];
+                defMap.set(def.name, defs);
+            }
+
+            defs.push(def);
+            return def;
         }
     }
 
@@ -1289,6 +1218,26 @@ export class YantraParser {
 
         return defMap.has(def.name);
     }
+
+    /**
+     * Searches for definitions of the given type. If found
+     * returns an array of ranges where found.
+     * @param {string>} lookupType
+     * @param {string} word
+     * @returns {range[]}
+     */
+    #searchDefinitions(lookupType, word) {
+        /** @type {Map<string, YantraDefinition[]>} */
+        const defMap = this.#definitionsMap.get(lookupType)
+        if (defMap?.has(word)) {
+            const defs = defMap.get(word);
+            const definitions = defs.map(def => def.range);
+            return definitions;
+        }
+
+        return [];
+    }
+
 }
 
 class ASTNode {
@@ -1336,6 +1285,10 @@ class ASTNode {
      */
     parse(state) {
         return undefined
+    }
+
+    toString() {
+        return `Type: ${this.type}, Name: ${this.name}`;
     }
 }
 
@@ -2158,6 +2111,7 @@ class CodeBlockNode extends ASTNode {
 
     /**
      * To be called when the end of the block has been encountered.
+     * This RESETS the current code block, so cache it if required.
      * @type {NodeParser}
      */
     parse(state) {
@@ -2191,6 +2145,7 @@ class CodeBlockNode extends ASTNode {
 class CodeBlockNameNode extends ASTNode {
     #classnameToken;
     #functionnameToken;
+    #ruleDefName;
 
     /**
      * 
@@ -2204,6 +2159,12 @@ class CodeBlockNameNode extends ASTNode {
         // - [2] function name
         this.#classnameToken = lexicalTokenFromLine(state, 1);
         this.#functionnameToken = lexicalTokenFromLine(state, 2);
+        // A code block name can only appear in a rule definition
+        this.#ruleDefName = state.ruleDefName;
+    }
+
+    get name() {
+        return `${this.#ruleDefName}::${this.className}::${this.functionName}`
     }
 
     get className() {
