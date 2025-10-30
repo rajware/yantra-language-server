@@ -104,6 +104,20 @@
  * @property {(name:string, type:string, range:range) => void} addForwardReference
  * @property {(name:string, type:string) => void} removeForwardReference
  */
+
+/**
+ * A completion item returned by the language server.
+ * @typedef {Object} CompletionItem
+ * @property {string} label - The label of this completion item (required).
+ * @property {number} [kind] - The kind/type of completion (e.g., Function, Class, Keyword).
+ * @property {string} [detail] - A short description of the item.
+ * @property {string|{kind: 'markdown'|'plaintext', value: string}} [documentation] - Optional documentation.
+ * @property {string} [sortText] - Text used to sort the item in the list.
+ * @property {string} [filterText] - Text used for filtering matches.
+ * @property {string} [insertText] - Text to insert (defaults to label).
+ * @property {1|2} [insertTextFormat] - Format of insertText: 1 = plain text, 2 = snippet.
+ * @property {{range: range, newText: string}} [textEdit] - Optional text edit to apply.
+ */
 //#endregion
 
 //#region Enums
@@ -168,11 +182,46 @@ const RepeatedElementPattern = {
     RuleDefs: /\s*?(?:([a-zA-Z]\w*)\s*(?:\(([a-zA-Z]\w*)\))?\s*)+?/dg
 }
 
+/**
+ * Enumeration of completion item kinds.
+ * @readonly
+ * @enum {number}
+ */
+const CompletionItemKind = {
+    Text: 1,
+    Method: 2,
+    Function: 3,
+    Constructor: 4,
+    Field: 5,
+    Variable: 6,
+    Class: 7,
+    Interface: 8,
+    Module: 9,
+    Property: 10,
+    Unit: 11,
+    Value: 12,
+    Enum: 13,
+    Keyword: 14,
+    Snippet: 15,
+    Color: 16,
+    File: 17,
+    Reference: 18,
+    Folder: 19,
+    EnumMember: 20,
+    Constant: 21,
+    Struct: 22,
+    Event: 23,
+    Operator: 24,
+    TypeParameter: 25
+};
+
 Object.freeze(ErrorSeverity);
 Object.freeze(ParserStatus);
 Object.freeze(SyntaxPattern);
 Object.freeze(ElementPattern);
 Object.freeze(RepeatedElementPattern);
+Object.freeze(CompletionItemKind);
+
 //#endregion
 
 //#region Utility Functions
@@ -662,7 +711,7 @@ export class YantraParser {
     getDefinitionsAt(line, character) {
         const defs = [];
 
-        if(this.#status !== ParserStatus.Ready) return defs;
+        if (this.#status !== ParserStatus.Ready) return defs;
 
         if (line < 0 || line > this.#astNodes.length) return defs;
 
@@ -676,6 +725,69 @@ export class YantraParser {
         }
 
         return defs;
+    }
+
+    /**
+     * Returns completion items based on line context and cursor position.
+     * @param {number} line
+     * @param {number} character
+     * @param {string} lineText
+     * @returns {CompletionItem[]}
+     */
+    getCompletionsAt(line, character, lineText) {
+        if (this.#status !== ParserStatus.Ready) return [];
+
+        /** @type {CompletionItem[]} */
+        const completions = [];
+
+        // First, completions at the beginning of the line
+        const trimmed = lineText.trimStart();
+        const prefix = trimmed.slice(1, character).trim();
+
+        // % → pragma suggestions
+        if (trimmed.startsWith('%')) {
+
+            const pragmaNames = ['class', 'walkers', 'default_walker', 'members', 'left', 'right', 'token', 'function'];
+
+            const names = this.#namesToCompletions(
+                pragmaNames,
+                prefix,
+                CompletionItemKind.Keyword,
+                'pragma'
+            );
+
+            completions.push(...names);
+            return completions;
+        }
+
+        // @ → walker/function suggestions
+        if (trimmed.startsWith('@')) {
+            if (trimmed.endsWith('::')) {
+                // Suggest functions
+                const funcNames = this.#definitionsToCompletions(
+                    'function',
+                    prefix,
+                    CompletionItemKind.Method
+                );
+
+                completions.push(...funcNames);
+                return completions
+            }
+
+            // suggest walkers
+            const walkerNames = this.#definitionsToCompletions(
+                'walker',
+                prefix,
+                CompletionItemKind.Class
+            );
+
+            completions.push(...walkerNames);
+            return completions;
+        }
+
+        // Later, more context-sensitive completions
+
+        return [];
     }
 
     /**
@@ -1059,6 +1171,67 @@ export class YantraParser {
         }
 
         return [];
+    }
+
+    /**
+     * Filters an array of names by prefix, then converts them
+     * to an array of CompletionItems of the specified kind.
+     * @param {string[]} names - An array of names
+     * @param {string} prefix - A prefix to filter them
+     * @param {CompletionItemKind} kind - Item kind
+     * @param {*} detail - Item metadata string
+     * @returns {CompletionItem[]}
+     */
+    #namesToCompletions(names, prefix, kind, detail) {
+        return names.filter(name => name.startsWith(prefix))
+            .map((name) => {
+                return {
+                    label: name,
+                    kind,
+                    detail
+                }
+            });
+    }
+
+    /**
+     * Filters available definitions by prefix, then converts
+     * to an array of CompletionItems of the specified kind.
+     * The deftype will be returned in the detail property.
+     * @param {string} definitionType - The type of definition
+     * @param {string} prefix - A prefix to filter them
+     * @param {CompletionItemKind} kind - Item kind
+     * @returns {CompletionItem[]}
+     */
+    #definitionsToCompletions(definitionType, prefix, kind) {
+        if (definitionType !== 'function') {
+            const defs = this.#definitionsMap.get(definitionType);
+            if (!defs) return [];
+
+            const names = Array.from(defs.keys());
+            return this.#namesToCompletions(
+                names, prefix, kind, definitionType
+            );
+        }
+
+        const defs = this.#definitionsMap.get('function');
+        const funcFilter = new RegExp(`\\w+?::${prefix}\w*`);
+        const funcNames = Array.from(defs.keys())
+            .filter(name => funcFilter.test(name))
+            .map((name) => {
+                const lastcolon = name.lastIndexOf('::');
+                const insertText = lastcolon === -1
+                    ? name
+                    : name.slice(lastcolon + 2);
+
+                return {
+                    label: name,
+                    insertText,
+                    kind,
+                    detail: definitionType
+                };
+            });
+
+        return funcNames;
     }
 }
 

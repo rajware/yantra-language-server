@@ -62,7 +62,11 @@ connection.onInitialize((params) => {
   return {
     capabilities: {
       textDocumentSync: documents.syncKind,
-      definitionProvider: true
+      definitionProvider: true,
+      completionProvider: {
+        resolveProvider: false,
+        triggerCharacters: ['@', '%']
+      }
     },
   };
 });
@@ -98,6 +102,24 @@ connection.onNotification('yantra/errorThresholdChanged', (params) => {
   }
   connection.console.info(`Error threshold updated to ${params.value}`);
 });
+
+// Handle autocomplete request
+connection.onCompletion((params) => {
+  const { textDocument, position } = params;
+  const document = documents.get(textDocument.uri);
+  if (!document) return [];
+
+  const parser = parserCache.get(textDocument.uri);
+  if (!parser || parser.status !== ParserStatus.Ready) return [];
+
+  const lineText = document.getText({
+    start: { line: position.line, character: 0 },
+    end: { line: position.line + 1, character: 0 }
+  });
+
+  return parser.getCompletionsAt(position.line, position.character, lineText);
+});
+
 
 // Diagnostic logic
 function updateDiagnostics(document) {
