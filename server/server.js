@@ -111,11 +111,12 @@ connection.onDefinition((params) => {
   const documentParser = parserCache.get(document.uri);
   if (!documentParser || documentParser.status != ParserStatus.Ready) return null;
 
-  const word = documentParser.getWordAt(position.line, position.character);
-  if (!word) return null;
+  // const word = documentParser.getWordAt(position.line, position.character);
+  // if (!word) return null;
 
-  const definitions = documentParser.getDefinitionLocationsFor(word);
-  if (!definitions || definitions.length === 0) return null;
+  // const definitions = documentParser.getDefinitionLocationsFor(word);
+  // if (!definitions || definitions.length === 0) return null;
+  const definitions = documentParser.getDefinitionsAt(position.line, position.character);
 
   return definitions.map(def => Location.create(
     textDocument.uri,

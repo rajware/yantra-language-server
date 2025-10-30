@@ -268,6 +268,22 @@ const lexicalTokenFromMatch = (matches, matchIndex, line, characterOffset = 0) =
 }
 
 /**
+ * Returns true if the passed character position is inside the
+ * passed lexical token's character boundaries, else false.
+ * @param {LexicalToken} token 
+ * @param {Number} character 
+ * @returns {boolean}
+ */
+const isChracterInsideToken = (token, character) => {
+    if (character >= token.range.start.character &&
+        character <= token.range.end.character) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
  * Creates a range spanning the current line
  * @param {ParseState} state
  * @returns {range}
@@ -446,26 +462,12 @@ class ParseState {
      * @param {Number} [endColumn] - The column on the current line where the diagnostic context ends. By default the end of the line.
      */
     addError(message, severity = ErrorSeverity.Error, startColumn, endColumn) {
-        // const self = this;
-        // startColumn = startColumn ?? 0;
-        // endColumn = endColumn ?? this.#line.length;
         const range = {
             start: { line: this.#line, character: startColumn ?? 0 },
             end: { line: this.#line, character: endColumn ?? this.#lineText.length }
         }
         this.#globalState.addErrorWithRange(message, severity, range);
         this.#errorCount++;
-
-        // this.globalState.addError(self, message, severity, startColumn, endColumn);
-
-        // this.#errors.push({
-        //     severity,
-        //     message,
-        //     range: {
-        //         start: { line: this.#line, character: startColumn },
-        //         end: { line: this.#line, character: endColumn }
-        //     }
-        // });
     }
 
     /**
@@ -658,62 +660,29 @@ export class YantraParser {
     }
 
     /**
-     * Returns the word surrounding the position (lineNumber, char).
-     * If there is a space at that position, or the position is 
-     * beyond the boundaries of the document, returns null.
-     * @param {Number} lineNumber 
-     * @param {Number} char 
-     * @returns {string|null}
+     * 
+     * @param {Number} line 
+     * @param {Number} character 
      */
-    getWordAt(lineNumber, char) {
-        if (lineNumber >= this.#lines.length) {
-            return null;
+    getDefinitionsAt(line, character) {
+        const defs = [];
+
+        if (line < 0 && line > this.#astNodes.length) {
+            return defs;
         }
 
-        const line = this.#lines[lineNumber];
-        if (char >= line.length) {
-            return null
+        const node = this.#astNodes[line];
+        if (!node) {
+            return defs;
         }
 
-        if (line.charAt(char).trim() === "") {
-            return null;
+        const searchElement = node.getElementForDefinitionsAt(character);
+        if (searchElement) {
+            const nodeDefs = this.#searchDefinitions(searchElement.type, searchElement.name);
+            defs.push(...nodeDefs);
         }
 
-        const regex = /\b[\w%]+\b/g;
-        let match;
-        while ((match = regex.exec(line))) {
-            if (match.index <= char && regex.lastIndex >= char) {
-                return match[0];
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Gets an array of locations where the definition(s) for the
-     * parameter are present. If the word is not recognized or no
-     * definitions exist, an empty array is returned.
-     * @param {string} word 
-     * @returns {range[]}
-     */
-    getDefinitionLocationsFor(word) {
-        const result = [];
-
-        if (isYantraTokenName(word)) {
-            const results = this.#searchDefinitions('token', word);
-            result.push(...results);
-        }
-
-        if (isYantraRuleName(word)) {
-            const results = this.#searchDefinitions('rule', word);
-            result.push(...results);
-        }
-
-        const results = this.#searchDefinitions('walker', word);
-        result.push(...results);
-
-        return result
+        return defs;
     }
 
     /**
@@ -999,75 +968,7 @@ export class YantraParser {
         const node = new CodeBlockNameNode(state);
         node.parse(state);
         return node;
-        // // The codeblockname regexp returns
-        // // - [1] class (walker) name
-        // // - [2] function name
-        // const className = state.matches[1];
-        // const functionName = state.matches[2] ?? 'go';
-
-        // // Validate the classname
-        // if (!this.#walkerDefinitions.has(className)) {
-        //     const startColumn = state.matches.indices[1][0];
-        //     const endColumn = state.matches.indices[1][1];
-        //     /* state = */ this.#addError(
-        //         state,
-        //         `A walker named '${className}' has not been defined`,
-        //         ErrorSeverity.Warning,
-        //         startColumn,
-        //         endColumn
-        //     );
-        // }
-
-        // if (functionName != 'go') {
-        //     // The full function name is in the form:
-        //     //   RULENAME::WALKERNAME::functionname
-        //     const funcFullName = `${state.ruleDefName}::${className}::${functionName}`;
-        //     if (!this.#functionDefinitions.has(funcFullName)) {
-        //         const startColumn = state.matches.indices[1][0];
-        //         const endColumn = state.matches.indices[1][1];
-
-        //         /* state = */ this.#addError(
-        //             state,
-        //             `A function called ${functionName} has not been defined for the walker ${className} and the rule ${state.ruleDefName}`,
-        //             ErrorSeverity.Warning,
-        //             startColumn,
-        //             endColumn
-        //         );
-        //     }
-        // }
-
-        // state.setCodeBlockName(className, functionName);
-
-        // // Once a name is parsed, we no longer expect a
-        // // name, but we immediately expect a code block
-        // state.expectNamedCodeBlock = false;
-        // state.expectCodeBlock = true;
-
-        // state.result = "Code Block Name";
-        // return state
     }
-
-    /**
-     * Adds an error (diagnostic) to the current document
-     * @private
-     * @param {ParseState} state 
-     * @param {string} message - The diagnotic message
-     * @param {ErrorSeverity} severity - The error severity. Default is Error.
-     * @param {Number} [startColumn] - The column on the current line where the diagnostic context begins. By default the start of the line.
-     * @param {Number} [endColumn] - The column on the current line where the diagnostic context ends. By default the end of the line.
-     * @param {Number} [endRow] - The line number where the diagnostic context ends. By default the current line number.
-     */
-    // #addError(state, message, severity = ErrorSeverity.Error, startColumn, endColumn, endRow) {
-    //     this.#addErrorWithRange(
-    //         state,
-    //         message,
-    //         severity,
-    //         {
-    //             start: { line: state.line, character: startColumn ?? 0 },
-    //             end: { line: endRow ?? state.line, character: endColumn ?? state.lineText.length }
-    //         }
-    //     );
-    // }
 
     /**
      * Adds an error (diagnostic) to the current document for the given range
@@ -1211,6 +1112,17 @@ class ASTNode {
      */
     parse(state) {
         return undefined
+    }
+
+    /**
+     * Gets an element in this node, or the whole node, so
+     * that definitions can be fetched for it. If the node
+     * is not suitable for definitions, returns null.
+     * @param {Number} character
+     * @returns {ASTNode|null}
+     */
+    getElementForDefinitionsAt(character) {
+        return null;
     }
 
     toString() {
@@ -1402,6 +1314,7 @@ class WalkersPragmaNode extends PragmaNode {
 
         // The first walker is considered the default walker
         state.defaultWalker = this.#walkers[0].name;
+        state.walkersPragmaDefined = true;
     }
 }
 
@@ -1436,7 +1349,8 @@ class WalkerNode extends ASTNode {
 }
 
 class DefaultWalkerPragmaNode extends PragmaNode {
-    #walkerReferenceNode;
+    /** @type {LexicalToken} */
+    #walkerReferenceToken;
 
     constructor(state) {
         super(state)
@@ -1467,6 +1381,8 @@ class DefaultWalkerPragmaNode extends PragmaNode {
             state.line,
             this.paramsToken.range.start.character
         );
+        // Forgiving
+        this.#walkerReferenceToken = walkerNameToken;
 
         const walkerReferenceNode = new WalkerNode(walkerNameToken);
 
@@ -1485,14 +1401,23 @@ class DefaultWalkerPragmaNode extends PragmaNode {
             return;
         }
 
-        this.#walkerReferenceNode = walkerReferenceNode;
-
         // Set the default walker name
         state.defaultWalker = walkerName;
+    }
+
+    getElementForDefinitionsAt(character) {
+        if (isChracterInsideToken(this.#walkerReferenceToken, character)) {
+            return { type: 'walker', name: this.#walkerReferenceToken.lexeme };
+        }
+
+        return null;
     }
 }
 
 class MembersPragmaNode extends PragmaNode {
+    /** @type {LexicalToken} */
+    #walkerNameToken;
+
     constructor(state) {
         super(state)
     }
@@ -1526,6 +1451,8 @@ class MembersPragmaNode extends PragmaNode {
             state.line,
             this.paramsToken.range.start.character
         );
+        // Forgiving
+        this.#walkerNameToken = walkerNameToken;
         const walkerReferenceNode = new WalkerNode(walkerNameToken);
 
         const walkerName = walkerNameToken.lexeme;
@@ -1553,9 +1480,6 @@ class MembersPragmaNode extends PragmaNode {
         //     )
         // }
 
-        // For now, set the walker value to true, signifying members defined.
-        // this.#pragmas.walkers?.set(walkerName, true);
-
         // A members pragma must be followed by an anonymous code 
         // block, so we will supply a name ourselves.
         state.setCodeBlockName(walkerName, 'Members');
@@ -1563,9 +1487,22 @@ class MembersPragmaNode extends PragmaNode {
         // block
         state.expectCodeBlock = true;
     }
+
+    getElementForDefinitionsAt(character) {
+        if (this.#walkerNameToken &&
+            isChracterInsideToken(this.#walkerNameToken, character)) {
+            return {
+                type: 'walker',
+                name: this.#walkerNameToken.lexeme
+            };
+        }
+
+        return null;
+    }
 }
 
 class AssociativityPragmaNode extends PragmaNode {
+    /** @type {LexicalToken[]} */
     #tokenNameTokens;
 
     constructor(state) {
@@ -1626,10 +1563,22 @@ class AssociativityPragmaNode extends PragmaNode {
             }
         }
     }
+
+    getElementForDefinitionsAt(character) {
+        const defObj = this.#tokenNameTokens?.find((ltoken) => {
+            return isChracterInsideToken(ltoken, character);
+        });
+
+        return defObj
+            ? { type: 'token', name: defObj.lexeme }
+            : null;
+    }
 }
 
 
 class FunctionPragmaNode extends PragmaNode {
+    /** @type {FunctionDefinitionNode} */
+    #functionDefinition;
 
     constructor(state) {
         super(state);
@@ -1653,6 +1602,8 @@ class FunctionPragmaNode extends PragmaNode {
         }
 
         const funcdef = new FunctionDefinitionNode(paramsMatch, state.line, this.paramsToken.range.start.character, state.defaultWalker);
+        // Forgiving
+        this.#functionDefinition = funcdef;
 
         // Look up classname
         if (funcdef.walkerNameToken) {
@@ -1707,15 +1658,21 @@ class FunctionPragmaNode extends PragmaNode {
             funcdef.functionNameToken.range
         );
     }
+
+    getElementForDefinitionsAt(character) {
+        if (character > this.paramsToken.range.start.character) {
+            return this.#functionDefinition?.getElementForDefinitionsAt(character);
+        }
+    }
 }
 
 class FunctionDefinitionNode extends ASTNode {
-    #ruleName;
-    #walkerName;
-    #functionName;
-    #allParams;
-    #returnType;
-    #terminator;
+    #ruleNameToken;
+    #walkerNameToken;
+    #functionNameToken;
+    #allParamsToken;
+    #returnTypeToken;
+    #terminatorToken;
 
     #defaulWalkerName;
 
@@ -1742,12 +1699,12 @@ class FunctionDefinitionNode extends ASTNode {
         // - [4] All C++ function parameters as a string
         // - [5] The C++ return type of the function as a string
         // - [6] A semicolon. May be empty
-        this.#ruleName = lexicalTokenFromMatch(match, 1, fdLine, fdOffset);
-        this.#walkerName = lexicalTokenFromMatch(match, 2, fdLine, fdOffset);
-        this.#functionName = lexicalTokenFromMatch(match, 3, fdLine, fdOffset);
-        this.#allParams = lexicalTokenFromMatch(match, 4, fdLine, fdOffset);
-        this.#returnType = lexicalTokenFromMatch(match, 5, fdLine, fdOffset);
-        this.#terminator = lexicalTokenFromMatch(match, 6, fdLine, fdOffset)
+        this.#ruleNameToken = lexicalTokenFromMatch(match, 1, fdLine, fdOffset);
+        this.#walkerNameToken = lexicalTokenFromMatch(match, 2, fdLine, fdOffset);
+        this.#functionNameToken = lexicalTokenFromMatch(match, 3, fdLine, fdOffset);
+        this.#allParamsToken = lexicalTokenFromMatch(match, 4, fdLine, fdOffset);
+        this.#returnTypeToken = lexicalTokenFromMatch(match, 5, fdLine, fdOffset);
+        this.#terminatorToken = lexicalTokenFromMatch(match, 6, fdLine, fdOffset)
     }
 
     get type() {
@@ -1759,27 +1716,39 @@ class FunctionDefinitionNode extends ASTNode {
     }
 
     get RuleNameToken() {
-        return this.#ruleName;
+        return this.#ruleNameToken;
     }
 
     get ruleName() {
-        return this.#ruleName.lexeme;
+        return this.#ruleNameToken.lexeme;
     }
 
     get walkerNameToken() {
-        return this.#walkerName;
+        return this.#walkerNameToken;
     }
 
     get walkerName() {
-        return this.#walkerName?.lexeme ?? this.#defaulWalkerName;
+        return this.#walkerNameToken?.lexeme ?? this.#defaulWalkerName;
     }
 
     get functionNameToken() {
-        return this.#functionName;
+        return this.#functionNameToken;
     }
 
     get functionName() {
         return this.functionNameToken.lexeme;
+    }
+
+    getElementForDefinitionsAt(character) {
+        if (isChracterInsideToken(this.#ruleNameToken, character)) {
+            return { type: 'rule', name: this.#ruleNameToken.lexeme };
+        }
+
+        if (isChracterInsideToken(this.#walkerNameToken, character)) {
+            return { type: 'walker', name: this.#walkerNameToken.lexeme };
+        }
+
+        return null;
     }
 }
 
@@ -1947,6 +1916,24 @@ class RuleNode extends ASTNode {
         // Clear any forward references
         state.removeForwardReference(this.name, 'rule');
     }
+
+    getElementForDefinitionsAt(character) {
+        const rdef = this.#ruleDefElements?.find(
+            rdelement => isChracterInsideToken(rdelement.element, character)
+        );
+
+        if (rdef) {
+            if (isYantraTokenName(rdef.element.lexeme)) {
+                return { type: 'token', name: rdef.element.lexeme }
+
+            }
+            if (isYantraRuleName(rdef.element.lexeme)) {
+                return { type: 'rule', name: rdef.element.lexeme }
+            }
+        }
+
+        return null;
+    }
 }
 
 class CommentNode extends ASTNode {
@@ -2044,6 +2031,8 @@ class CodeBlockNameNode extends ASTNode {
     }
 
     get name() {
+        // The full function name is in the form:
+        //   RULENAME::WALKERNAME::functionname
         return `${this.#ruleDefName}::${this.className}::${this.functionName}`
     }
 
@@ -2072,9 +2061,8 @@ class CodeBlockNameNode extends ASTNode {
         }
 
         if (this.functionName != 'go') {
-            // The full function name is in the form:
-            //   RULENAME::WALKERNAME::functionname
-            const funcFullName = `${state.ruleDefName}::${this.className}::${this.functionName}`;
+            //const funcFullName = `${state.ruleDefName}::${this.className}::${this.functionName}`;
+            const funcFullName = this.name;
             if (!state.lookupDefinition({ type: 'function', name: funcFullName })) {
                 const startColumn = this.#functionnameToken.range.start.character;
                 const endColumn = this.#functionnameToken.range.end.character;
@@ -2094,5 +2082,17 @@ class CodeBlockNameNode extends ASTNode {
         // name, but we immediately expect a code block
         state.expectNamedCodeBlock = false;
         state.expectCodeBlock = true;
+    }
+
+    getElementForDefinitionsAt(character) {
+        if (isChracterInsideToken(this.#classnameToken, character)) {
+            return { type: 'walker', name: this.#classnameToken.lexeme };
+        }
+
+        if (isChracterInsideToken(this.#functionnameToken, character)) {
+            return { type: 'function', name: this.name };
+        }
+
+        return null;
     }
 }
