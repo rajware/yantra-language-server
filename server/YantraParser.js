@@ -154,7 +154,7 @@ const SyntaxPattern = {
     Comment: /^\s*?\/\/.*?$/,
     Pragma: /^\s*?%([a-z_]+)(?:\s+(.*?))?(;?)$/d,
     TokenDefinition: /^\s*?([A-Z][A-Z0-9_]*?)\s*?(:=)\s*?(".*?")(!)?\s*?(;)?\s*?$/d,
-    RuleDefinition: /^\s*?([a-z][\w]*?)\s*?:=\s*?(.*?)(;)?\s*?$/d,
+    RuleDefinition: /^\s*?([a-z]\w*?)\s*?(?:\(([a-z]\w*?)\)\s*?)?(:=)\s*?(.*?)(;)?\s*?$/d,
     CodeBlockName: /^@(\w+)(?:::(\w+))?\s*?$/d
 }
 
@@ -1922,6 +1922,8 @@ class FunctionDefinitionNode extends ASTNode {
 
 class RuleNode extends ASTNode {
     #nameToken;
+    #aliasToken;
+    #assignOpToken;
     #definitionToken;
     #terminatorToken;
 
@@ -1931,11 +1933,15 @@ class RuleNode extends ASTNode {
     constructor(state) {
         // The ruledef regexp returns:
         // - [1] - rule name
-        // - [2] - the entire rule definition
-        // - [3] - semicolon, optional
+        // - [2] - alias, optional
+        // - [3] - the assignment operator
+        // - [4] - the entire rule definition
+        // - [5] - semicolon, optional
         const name = lexicalTokenFromLine(state, 1);
-        const defininition = lexicalTokenFromLine(state, 2);
-        const terminator = lexicalTokenFromLine(state, 3);
+        const alias = lexicalTokenFromLine(state, 2);
+        const assignOp = lexicalTokenFromLine(state, 3);
+        const defininition = lexicalTokenFromLine(state, 4);
+        const terminator = lexicalTokenFromLine(state, 5);
 
         super('rule', {
             start: { line: state.line, character: 0 },
@@ -1948,6 +1954,8 @@ class RuleNode extends ASTNode {
         });
 
         this.#nameToken = name;
+        this.#aliasToken = alias;
+        this.#assignOpToken = assignOp;
         this.#definitionToken = defininition;
         this.#terminatorToken = terminator;
 
