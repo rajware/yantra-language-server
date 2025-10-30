@@ -84,11 +84,21 @@
  */
 
 /**
+ * Error reporting function.
+ * @callback AddErrorWithRange
+ * @param {string} message - The diagnotic message
+ * @param {ErrorSeverity} severity - The error severity. Default is Error.
+ * @param {range} range - The range of the diagnostic context.
+ * @returns {void}
+ */
+
+/**
+ * The connection between line state and document state.
  * @typedef {Object} GlobalState
  * @property {string} className
  * @property {boolean} walkersPragmaDefined
  * @property {string} defaultWalkerName
- * @property {() => {void}} addError
+ * @property {AddErrorWithRange} addErrorWithRange
  * @property {(def:ASTNode) => void} addDefinition
  * @property {(def:ASTNode) => boolean } lookupDefinition
  * @property {(name:string, type:string, range:range) => void} addForwardReference
@@ -274,38 +284,39 @@ const fullLineRange = (state) => {
  * Parser state in the current line.
  */
 class ParseState {
+    /**
+     * The connection to global state.
+     * @type {GlobalState}
+     */
+    #globalState;
+
     // Current line properties.
     // These reset per line.
 
     /**
      * The line currently being parsed.
      */
-    #lineText = "";
+    #lineText;
     /**
      * The line number (zero-based) currently being parsed.
      */
-    #line = 0;
+    #line;
     /**
      * The regexp match that invoked the current parser.
      * @type {RegExpMatchArray | null}
      */
-    #matches = [];
-
-    result = null;
+    #matches;
 
     // All properties after this represent
     // state carried over multiple lines.
     // They do NOT reset per line.
 
-    // Document cumulative properties
+    // Cumulative properties for document
     /**
-     * The total count of errors found so far.
+     * @type {Number}
      */
-    errorCount = 0;
-    /**
-     * @type {GlobalState}
-     */
-    globalState;
+    #errorCount = 0;
+
 
     /** @type {string|undefined} */
     className;
@@ -357,6 +368,19 @@ class ParseState {
      */
     ruleDefName = '';
 
+
+    /**
+     * 
+     * @param {GlobalState} globalState 
+     */
+    constructor(globalState) {
+        this.#globalState = globalState;
+        this.#lineText = "";
+        this.#line = 0;
+        this.#matches = [];
+        this.#errorCount = 0;
+
+    }
     /**
      * The line number (zero-based) currently being parsed.
      * @type {Number}
@@ -382,6 +406,15 @@ class ParseState {
      */
     get matches() {
         return this.#matches;
+    }
+
+    /**
+     * The total count of errors found so far.
+     * @type {Number}
+     * @readonly
+     */
+    get errorCount() {
+        return this.#errorCount;
     }
 
     /**
@@ -413,10 +446,17 @@ class ParseState {
      * @param {Number} [endColumn] - The column on the current line where the diagnostic context ends. By default the end of the line.
      */
     addError(message, severity = ErrorSeverity.Error, startColumn, endColumn) {
-        const self = this;
-        this.globalState.addError(self, message, severity, startColumn, endColumn);
+        // const self = this;
         // startColumn = startColumn ?? 0;
         // endColumn = endColumn ?? this.#line.length;
+        const range = {
+            start: { line: this.#line, character: startColumn ?? 0 },
+            end: { line: this.#line, character: endColumn ?? this.#lineText.length }
+        }
+        this.#globalState.addErrorWithRange(message, severity, range);
+        this.#errorCount++;
+
+        // this.globalState.addError(self, message, severity, startColumn, endColumn);
 
         // this.#errors.push({
         //     severity,
@@ -429,11 +469,29 @@ class ParseState {
     }
 
     /**
+     * Adds an error to the current ruledef line, and resets ruledef state.
+     * Should be called to indicate that a code block was expected right
+     * after rule definition.
+     */
+    addRuleDefCodeBlockExpectedError() {
+        this.#globalState.addErrorWithRange(
+            'Rule definition should be immediately followed by a semicolon or a code block',
+            ErrorSeverity.Error,
+            {
+                start: { line: this.ruleDefLineNumber, character: 0 },
+                end: { line: this.ruleDefLineNumber, character: Number.MAX_VALUE }
+            }
+        );
+        this.#errorCount++;
+        this.resetRuleDef();
+    }
+
+    /**
      * Adds a definition to the current line
      * @param {YantraDefinition} def
      */
     addDefinition(def) {
-        this.globalState.addDefinition(def);
+        this.#globalState.addDefinition(def);
     }
 
     /**
@@ -442,7 +500,7 @@ class ParseState {
      * @returns {boolean}
      */
     lookupDefinition(def) {
-        return this.globalState.lookupDefinition(def);
+        return this.#globalState.lookupDefinition(def);
     }
 
     /**
@@ -452,7 +510,7 @@ class ParseState {
      * @param {range} range 
      */
     addForwardReference(name, type, range) {
-        this.globalState.addForwardReference(name, type, range);
+        this.#globalState.addForwardReference(name, type, range);
     }
 
     /**
@@ -462,7 +520,7 @@ class ParseState {
      * @param {range} range 
      */
     removeForwardReference(name, type) {
-        this.globalState.removeForwardReference(name, type);
+        this.#globalState.removeForwardReference(name, type);
     }
 
     /**
@@ -688,14 +746,13 @@ export class YantraParser {
     }
 
     #parseLines() {
-        let state = new ParseState();
-        state.globalState = {
-            addError: this.#addError.bind(this),
+        let state = new ParseState({
+            addErrorWithRange: this.#addErrorWithRange.bind(this),
             addDefinition: this.#adddefinition.bind(this),
             lookupDefinition: this.#lookupDefinition.bind(this),
             addForwardReference: this.#addForwardReference.bind(this),
             removeForwardReference: this.#removeForwardReference.bind(this)
-        }
+        });
 
         for (let i = 0; i < this.#lines.length; i++) {
             const lineText = this.#lines[i];
@@ -708,11 +765,9 @@ export class YantraParser {
             if (state.inCodeBlock) {
                 if (trimmedLine === "%}") {
                     this.#astNodes[i] = this.#parseEndCodeBlock(state);
-
                     continue;
                 } else {
                     this.#astNodes[i] = state.currentCodeBlock;
-
                     continue;
                 }
             }
@@ -725,7 +780,6 @@ export class YantraParser {
                     state.matchLine(SyntaxPattern.CodeBlockName);
                     if (state.matches) {
                         this.#astNodes[i] = this.#parseCodeBlockName(state);
-
                         continue;
                     }
                 }
@@ -735,24 +789,15 @@ export class YantraParser {
             // is not a block begin, that's the error. 
             if (state.expectCodeBlock) {
                 if (trimmedLine !== "%{") {
-                    this.#addError(state, 'a code block was expected');
+                    state.addError('a code block was expected');
 
                     if (state.inRuleDef) {
-                        // TODO: check this
-                        this.#addError(
-                            state,
-                            'Rule definition should be followed by a semicolon or a code block',
-                            ErrorSeverity.Error,
-                            state.ruleDefLineNumber,
-                            0
-                        )
-                        state.resetRuleDef();
+                        state.addRuleDefCodeBlockExpectedError();
                     }
 
                     state.expectCodeBlock = false;
                     // This is an error line
                     this.#astNodes[i] = undefined;
-
                     continue;
                 }
             }
@@ -760,15 +805,12 @@ export class YantraParser {
             switch (trimmedLine) {
                 case "":
                     this.#astNodes[i] = undefined;
-
                     break;
                 case "%{":
                     this.#astNodes[i] = this.#parseBeginCodeBlock(state);
-
                     break;
                 case "%}":
                     this.#astNodes[i] = this.#parseEndCodeBlock(state);
-
                     break;
                 default: {
                     let matched = false;
@@ -777,15 +819,13 @@ export class YantraParser {
                         state.matchLine(linePattern.pattern);
                         if (state.matches) {
                             this.#astNodes[i] = linePattern.action(state);
-
                             matched = true;
                             break;
                         }
                     }
                     if (!matched) {
-                        this.#addError(state, 'Syntax Error');
+                        state.addError('Syntax Error');
                         this.#astNodes[i] = undefined;
-
                     }
                     break;
                 }
@@ -793,8 +833,7 @@ export class YantraParser {
 
             // Stop parsing if too many errors
             if (state.errorCount > this.#errorThreshold) {
-                this.#addError(state, 'Too many errors. Parsing will stop');
-
+                state.addError('Too many errors. Parsing will stop');
                 break;
             }
         }
@@ -809,13 +848,13 @@ export class YantraParser {
 
             if (!defs.has(forwardRef.name)) {
                 this.#addErrorWithRange(
-                    state,
                     `The ${forwardRef.type} '${forwardRef.name}' has not been defined`,
                     ErrorSeverity.Warning,
                     forwardRef.range
                 );
             }
         }
+
         // Clear forward references
         this.#forwardReferences = [];
     }
@@ -826,24 +865,10 @@ export class YantraParser {
      */
     #parseBeginCodeBlock(state) {
         if (!state.expectCodeBlock) {
-            this.#addError(state, 'Unexpected start of code block');
+            state.addError('Unexpected start of code block');
             return undefined;
         }
 
-        // Code block names are a combination of the following elements:
-        // - The rule definition name if part of a rule definition
-        // - The walker name with which this code block is associated
-        // - The function name for this code block
-        // Separated by ::
-        // const codeBlockName = `${state.inRuleDef ? state.ruleDefName + '::' : ''}${state.codeBlockName.className}::${state.codeBlockName.functionName}`;
-
-        // state.currentCodeBlock = {
-        //     name: codeBlockName,
-        //     range: {
-        //         start: { line: state.line, character: 0 },
-        //         end: undefined
-        //     }
-        // };
         const codeBlock = new CodeBlockNode(state)
         state.currentCodeBlock = codeBlock;
 
@@ -859,37 +884,13 @@ export class YantraParser {
      */
     #parseEndCodeBlock(state) {
         if (!state.inCodeBlock) {
-            this.#addError(state, "Unexpected end of code block");
+            state.addError("Unexpected end of code block");
             return undefined;
         }
 
         const currentCodeBlock = state.currentCodeBlock;
         state.currentCodeBlock.parse(state);
         return currentCodeBlock;
-        // state.currentCodeBlock.range.end = {
-        // line: state.line,
-        //     character: 0
-        // };
-
-        // // Push the definition
-        // pushDefinition(this.#codeBlockDefinitions, state.currentCodeBlock);
-
-        // // Remove any forward references
-        // this.#removeForwardReference(state.currentCodeBlock.name, 'codeblock')
-
-        // Reset current code block and name
-        // state.currentCodeBlock = undefined;
-        // state.inCodeBlock = false;
-        // state.resetCodeBlockName();
-
-        // // If a code block ends while in a rule definition
-        // // then we expect a name next.
-        // if (state.inRuleDef) {
-        //     state.expectNamedCodeBlock = true;
-        // }
-
-        // state.result = "End Code Block";
-        // return /* state */;
     }
 
     /**
@@ -942,8 +943,7 @@ export class YantraParser {
         if (!pragmaNode) {
             const startColumn = state.matches.indices[1][0];
             const endColumn = state.matches.indices[1][1];
-            this.#addError(
-                state,
+            state.addError(
                 `Unknown pragma '${pragmaName}'`,
                 ErrorSeverity.Error,
                 startColumn,
@@ -990,8 +990,7 @@ export class YantraParser {
      */
     #parseCodeBlockName(state) {
         if (!state.inRuleDef) {
-            this.#addError(
-                state,
+            state.addError(
                 'Named code block unexpected'
             );
             return undefined;
@@ -1058,27 +1057,24 @@ export class YantraParser {
      * @param {Number} [endColumn] - The column on the current line where the diagnostic context ends. By default the end of the line.
      * @param {Number} [endRow] - The line number where the diagnostic context ends. By default the current line number.
      */
-    #addError(state, message, severity = ErrorSeverity.Error, startColumn, endColumn, endRow) {
-        this.#addErrorWithRange(
-            state,
-            message,
-            severity,
-            {
-                start: { line: state.line, character: startColumn ?? 0 },
-                end: { line: endRow ?? state.line, character: endColumn ?? state.lineText.length }
-            }
-        );
-    }
+    // #addError(state, message, severity = ErrorSeverity.Error, startColumn, endColumn, endRow) {
+    //     this.#addErrorWithRange(
+    //         state,
+    //         message,
+    //         severity,
+    //         {
+    //             start: { line: state.line, character: startColumn ?? 0 },
+    //             end: { line: endRow ?? state.line, character: endColumn ?? state.lineText.length }
+    //         }
+    //     );
+    // }
 
     /**
      * Adds an error (diagnostic) to the current document for the given range
      * @private
-     * @param {ParseState} state 
-     * @param {string} message - The diagnotic message
-     * @param {ErrorSeverity} severity - The error severity. Default is Error.
-     * @param {range} [range] - The range of the diagnostic context.
+     * @type {AddErrorWithRange}
      */
-    #addErrorWithRange(state, message, severity = ErrorSeverity.Error, range) {
+    #addErrorWithRange(message, severity = ErrorSeverity.Error, range) {
         const newError = {
             severity,
             message,
@@ -1086,7 +1082,6 @@ export class YantraParser {
         }
 
         this.#errors.push(newError);
-        state.errorCount++;
     }
 
     /**
