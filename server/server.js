@@ -34,6 +34,28 @@ const serverConfig = {
   errThreshold: 25
 }
 
+// Utilities
+function debounce(fn, delay) {
+  const timers = new Map(); // uri → timeout
+
+  return (uri, ...args) => {
+    if (timers.has(uri)) {
+      clearTimeout(timers.get(uri));
+    }
+
+    const timeout = setTimeout(() => {
+      timers.delete(uri);
+      fn(uri, ...args);
+    }, delay);
+
+    timers.set(uri, timeout);
+  };
+}
+
+
+// Handlers
+
+// Handle initialize
 connection.onInitialize((params) => {
   serverConfig.errThreshold = params.initializationOptions?.errorThreshold ?? 25;
 
@@ -55,7 +77,7 @@ documents.onDidOpen((event) => {
 // Handle document change
 documents.onDidChangeContent((change) => {
   const doc = change.document;
-  updateDiagnostics(doc);
+  debouncedUpdateDiagnostics(doc);
 });
 
 // Handle document close
@@ -101,6 +123,8 @@ function updateDiagnostics(document) {
 
   connection.sendDiagnostics({ uri: document.uri, diagnostics });
 }
+
+const debouncedUpdateDiagnostics = debounce(updateDiagnostics, 300);
 
 // Handle Go to Definition
 connection.onDefinition((params) => {
