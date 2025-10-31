@@ -398,7 +398,7 @@ class ParseState {
     inCodeBlock = false;
     /**
      * The current code block
-     * @type {ASTNode}
+     * @type {CodeBlockNode}
      */
     currentCodeBlock;
     /**
@@ -413,6 +413,8 @@ class ParseState {
     expectCodeBlock = false;
 
     // Rule Definition related properties
+    /** @type {RuleNode} */
+    #currentRule;
     /**
      * The next line parsed must be a code block name. If 
      * expectCodeBlock is also set, the next line can also
@@ -422,16 +424,16 @@ class ParseState {
     /**
      * If the scanner is currently in a rule definition.
      */
-    inRuleDef = false;
+    //#inRuleDef = false;
     /**
      * The line number of the start of the current rule 
      * definition, or -1.
      */
-    ruleDefLineNumber = -1;
+    //ruleDefLineNumber = -1;
     /**
      * The name of the current rule definition, or ''
      */
-    ruleDefName = '';
+    //ruleDefName = '';
 
 
     /**
@@ -483,6 +485,33 @@ class ParseState {
     }
 
     /**
+     * If the scanner is currently in a rule definition.
+     * @type {boolean}
+     * @readonly
+     */
+    get inRuleDef() {
+        return this.#currentRule ? true : false;
+    }
+
+    /**
+    * The name of the current rule definition, or ''
+    * @type {string}
+    * @readonly
+    */
+    get ruleDefName() {
+        return this.#currentRule?.name ?? '';
+    }
+
+
+    /**
+     * The line number of the start of the current rule 
+     * definition, or -1.
+     */
+    //ruleDefLineNumber = -1;
+
+
+
+    /**
      * Start a new line, and reset per-line properties
      * @param {Number} line 
      * @param {string} lineText 
@@ -525,12 +554,14 @@ class ParseState {
      * after rule definition.
      */
     addRuleDefCodeBlockExpectedError() {
+        const ruleDefLineNumber = this.#currentRule.range.start.line;
+
         this.#globalState.addErrorWithRange(
             'Rule definition should be immediately followed by a semicolon or a code block',
             ErrorSeverity.Error,
             {
-                start: { line: this.ruleDefLineNumber, character: 0 },
-                end: { line: this.ruleDefLineNumber, character: Number.MAX_VALUE }
+                start: { line: ruleDefLineNumber, character: 0 },
+                end: { line: ruleDefLineNumber, character: this.#currentRule.range.end.character }
             }
         );
         this.#errorCount++;
@@ -590,26 +621,47 @@ class ParseState {
         this.codeBlockName = undefined;
     }
 
+    // /**
+    //  * Indicate the start of a new rule definition,
+    //  * with the specified name
+    //  * @param {string} name 
+    //  */
+    // startRuleDefWithCodeBlocks(name) {
+    //     this.inRuleDef = true;
+    //     this.ruleDefName = name;
+    //     // this.ruleDefLineNumber = this.line;
+
+    //     // A rule defininition must be followed by
+    //     // a named or anonymous code block.
+    //     this.expectNamedCodeBlock = true;
+    //     this.expectCodeBlock = true;
+    // }
+
     /**
      * Indicate the start of a new rule definition,
      * with the specified name
-     * @param {string} name 
+     * @param {RuleNode} rule 
      */
-    startRuleDefWithCodeBlocks(name) {
-        this.inRuleDef = true;
-        this.ruleDefName = name;
-        this.ruleDefLineNumber = this.line;
+    startMultilineRule(rule) {
+        this.#currentRule = rule;
+        //rule.range.end = undefined;
+        //COMEBACKHERE
+        // this.inRuleDef = true;
+        // this.ruleDefName = rule.name;
+        // this.ruleDefLineNumber = this.line;
 
-        // A rule defininition must be followed by
-        // a named or anonymous code block.
         this.expectNamedCodeBlock = true;
         this.expectCodeBlock = true;
+
     }
 
     resetRuleDef() {
-        this.inRuleDef = false
-        this.ruleDefName = '';
-        this.ruleDefLineNumber = -1;
+        this.#currentRule?.end(this);
+        this.#currentRule = undefined;
+
+        // this.inRuleDef = false
+        // this.ruleDefName = '';
+        // this.ruleDefLineNumber = -1;
     }
 }
 
@@ -965,8 +1017,8 @@ export class YantraParser {
         }
 
         const currentCodeBlock = state.currentCodeBlock;
-        state.currentCodeBlock.parse(state);
-        return currentCodeBlock;
+        // state.currentCodeBlock.parse(state);
+        return currentCodeBlock.end(state);
     }
 
     /**
@@ -1295,6 +1347,18 @@ class ASTNode {
 
     toString() {
         return `Type: ${this.type}, Name: ${this.name}`;
+    }
+}
+
+class MultilineASTNode extends ASTNode {
+    /**
+     * Called at the end of a multi-line node.
+     * Returns this node.
+     * @param {ParseState} state 
+     * @returns {ASTNode}
+     */
+    end(state) {
+        return this;
     }
 }
 
@@ -1920,12 +1984,15 @@ class FunctionDefinitionNode extends ASTNode {
     }
 }
 
-class RuleNode extends ASTNode {
+class RuleNode extends MultilineASTNode {
     #nameToken;
     #aliasToken;
     #assignOpToken;
     #definitionToken;
     #terminatorToken;
+
+    /** @type {position} */
+    #multilineEnd;
 
     /** @type {RuleDefElement[]} */
     #ruleDefElements;
@@ -2082,7 +2149,8 @@ class RuleNode extends ASTNode {
             // We will set a default name for the first code block, which
             // could be anonymous
             state.setCodeBlockName(state.defaultWalker, 'go');
-            state.startRuleDefWithCodeBlocks(this.name);
+            // state.startRuleDefWithCodeBlocks(this.name);
+            state.startMultilineRule(this);
         }
 
         // Push definintion
@@ -2091,6 +2159,16 @@ class RuleNode extends ASTNode {
 
         // Clear any forward references
         state.removeForwardReference(this.name, 'rule');
+    }
+
+    end(state) {
+        // Rule ended as this line began
+        this.#multilineEnd = {
+            line: state.line,
+            character: 0
+        };
+
+        return this;
     }
 
     getElementForDefinitionsAt(character) {
@@ -2124,7 +2202,7 @@ class CommentNode extends ASTNode {
     }
 }
 
-class CodeBlockNode extends ASTNode {
+class CodeBlockNode extends MultilineASTNode {
     #name;
 
     /**
@@ -2155,16 +2233,22 @@ class CodeBlockNode extends ASTNode {
         return this.#name;
     }
 
+    parse(state) {
+        return state;
+    }
+
     /**
      * To be called when the end of the block has been encountered.
      * This RESETS the current code block, so cache it if required.
-     * @type {NodeParser}
+     * @param {ParseState} state
+     * @returns {CodeBlockNode}
      */
-    parse(state) {
+    end(state) {
+        // This codeblock ends on the current line (%})
         this.range.end = {
             line: state.line,
             character: state.lineText.length
-        }
+        };
 
         // Push definition
         state.addDefinition(this);
@@ -2182,6 +2266,8 @@ class CodeBlockNode extends ASTNode {
         if (state.inRuleDef) {
             state.expectNamedCodeBlock = true;
         }
+
+        return this;
     }
 }
 
