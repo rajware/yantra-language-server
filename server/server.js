@@ -66,7 +66,8 @@ connection.onInitialize((params) => {
       completionProvider: {
         resolveProvider: false,
         triggerCharacters: ['@', '%']
-      }
+      },
+      documentFormattingProvider: true
     },
   };
 });
@@ -120,6 +121,27 @@ connection.onCompletion((params) => {
   return parser.getCompletionsAt(position.line, position.character, lineText);
 });
 
+// Handle document formatting
+connection.onDocumentFormatting((params) => {
+  const { textDocument, options } = params;
+  const document = documents.get(textDocument.uri);
+  if (!document) return [];
+
+  const parser = parserCache.get(textDocument.uri);
+  if (!parser || parser.status !== ParserStatus.Ready) return [];
+
+  const lines = parser.getFormattedLines();
+  if (lines.length === 0) return lines;
+
+  connection.console.info(`Lines:\n${JSON.stringify(lines,' ')}`);
+  return [{
+    range: {
+      start: { line: 0, character: 0 },
+      end: { line: document.lineCount, character: 0 }
+    },
+    newText: lines.join('\n')
+  }];
+});
 
 // Diagnostic logic
 function updateDiagnostics(document) {

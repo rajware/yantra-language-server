@@ -168,7 +168,7 @@ const ElementPattern = {
     RuleName: /^[a-z]\w*?$/d,
     CppName: /^[a-zA-Z_]\w*$/d,
     SpacedCppName: /^\s*?([a-zA-Z_]\w*?)\s*$/d,
-    FunctionDefinition: /^\s*?([a-z_]\w+)\s+(?:(?:([a-zA-Z_]\w+)::)?([a-zA-Z_]\w+))\s*?\(.*?\)\s*?->\s*(?:([a-zA-Z_]\w+::)?([a-zA-Z_]\w+))\s*?(;)?\s*$/d
+    FunctionDefinition: /^\s*?([a-z_]\w+)\s+(?:(?:([a-zA-Z_]\w+)::)?([a-zA-Z_]\w+))\s*?\((.*?)\)\s*?->\s*(?:((?:[a-zA-Z_]\w+::)?[a-zA-Z_]\w+))\s*?(;)?\s*$/d
 }
 
 /**
@@ -850,12 +850,89 @@ export class YantraParser {
         return this.#errors;
     }
 
+
     /**
-     * Parses the input as a Yantra document. If the document
-     * has not changed since the last invocation,  parsing is 
-     * not done.
+     * Pretty prints the current document. Returns an array of
+     * strings, or an empty array if pretty printing not 
+     * possible.
+     * @returns {string[]}
+     */
+    getFormattedLines() {
+        const lines = [];
+        if (this.status !== ParserStatus.Ready) return lines;
+        if (this.#errors.length > 0) return lines;
+
+        // Get the formatted representation of AST nodes
+        this.#astNodes.forEach((node, index, nodes) => {
+            // If the node is equal to the previous node
+            // (as happens with code blocks), don't add
+            // again.
+            const nodeLines = !node
+                ? ['']
+                : index === 0 || node != nodes[index - 1]
+                    ? node.getFormattedLines()
+                    : undefined;
+
+            nodeLines && lines.push(...nodeLines);
+        });
+
+        // Run post-processing, such as aligning token
+        // definitions.
+        const processedlines = this.#alignTokenDefs(lines);
+
+        return processedlines;
+    }
+
+    #alignTokenDefs(lines) {
+        const tokenDefRegex = SyntaxPattern.TokenDefinition;
+        const result = [];
+        let buffer = [];
+
+        const flushBuffer = () => {
+            if (buffer.length === 0) return;
+
+            // Determine max length of the left-hand side
+            const maxLhsLength = Math.max(...buffer.map(line => {
+                const match = line.match(tokenDefRegex);
+                return match ? match[1].length : 0;
+            }));
+
+            // Reformat each line in the buffer
+            for (const line of buffer) {
+                const match = line.match(tokenDefRegex);
+                if (match) {
+                    const lhs = match[1].padEnd(maxLhsLength, ' ');
+                    const rhs = match[3];
+                    const bang = match[4] || '';
+                    const semicolon = match[5];
+                    result.push(`${lhs} := ${rhs}${bang}${semicolon}`);
+                } else {
+                    result.push(line); // fallback, shouldn't happen
+                }
+            }
+
+            buffer = [];
+        };
+
+        for (const line of lines) {
+            if (tokenDefRegex.test(line)) {
+                buffer.push(line);
+            } else {
+                flushBuffer();
+                result.push(line);
+            }
+        }
+
+        flushBuffer(); // flush any remaining lines
+
+        return result;
+    }
+
+
+    /**
+     * Parses the input as a Yantra document.
      * @param {string} inputText 
-     * @returns {string}
+     * @returns {void}
      */
     parse(inputText) {
         this.#status = ParserStatus.Parsing;
@@ -865,8 +942,6 @@ export class YantraParser {
         this.#astNodes = new Array(lines.length);
         this.#parseLines(lines);
         this.#status = ParserStatus.Ready;
-
-        return this.#astNodes.map(item => item?.toString() ?? "Unknown").join("\n");
     }
 
     /**
@@ -895,6 +970,7 @@ export class YantraParser {
                     this.#astNodes[i] = this.#parseEndCodeBlock(state);
                     continue;
                 } else {
+                    state.currentCodeBlock.appendLine(lineText);
                     this.#astNodes[i] = state.currentCodeBlock;
                     continue;
                 }
@@ -1345,6 +1421,15 @@ class ASTNode {
         return null;
     }
 
+    /**
+     * Returns a pretty-printed string representation of a
+     * node.
+     * @returns {string[]}
+     */
+    getFormattedLines() {
+        return [];
+    }
+
     toString() {
         return `Type: ${this.type}, Name: ${this.name}`;
     }
@@ -1363,11 +1448,11 @@ class MultilineASTNode extends ASTNode {
 }
 
 class TokenNode extends ASTNode {
-    #name; //: lexicalTokenFromLine(state, 1),
-    #assignmentOperator; //: lexicalTokenFromLine(state, 2),
-    #value; //: lexicalTokenFromLine(state, 3),
-    #negator; //: lexicalTokenFromLine(state, 4),
-    #terminator; //: lexicalTokenFromLine(state, 5)
+    #nameToken; //: lexicalTokenFromLine(state, 1),
+    #assignmentOperatorToken; //: lexicalTokenFromLine(state, 2),
+    #valueToken; //: lexicalTokenFromLine(state, 3),
+    #negatorToken; //: lexicalTokenFromLine(state, 4),
+    #terminatorToken; //: lexicalTokenFromLine(state, 5)
 
     /**
      * @param {ParseState} state
@@ -1381,20 +1466,20 @@ class TokenNode extends ASTNode {
         // - [3] token value
         // - [4] "!' if present
         // - [5] semicolon if present
-        this.#name = lexicalTokenFromLine(state, 1);
-        this.#assignmentOperator = lexicalTokenFromLine(state, 2);
-        this.#value = lexicalTokenFromLine(state, 3);
-        this.#negator = lexicalTokenFromLine(state, 4);
-        this.#terminator = lexicalTokenFromLine(state, 5);
+        this.#nameToken = lexicalTokenFromLine(state, 1);
+        this.#assignmentOperatorToken = lexicalTokenFromLine(state, 2);
+        this.#valueToken = lexicalTokenFromLine(state, 3);
+        this.#negatorToken = lexicalTokenFromLine(state, 4);
+        this.#terminatorToken = lexicalTokenFromLine(state, 5);
     }
 
     get name() {
-        return this.#name.lexeme;
+        return this.#nameToken.lexeme;
     }
 
     /** @type {NodeParser} */
     parse(state) {
-        if (!this.#terminator) {
+        if (!this.#terminatorToken) {
             state.addError('A token definition should end with a semicolon');
             return;
         }
@@ -1404,6 +1489,10 @@ class TokenNode extends ASTNode {
 
         // Remove any forward references for this token
         state.removeForwardReference(this.name, this.type);
+    }
+
+    getFormattedLines() {
+        return [`${this.name} := ${this.#valueToken.lexeme}${this.#negatorToken?.lexeme ?? ''};`]
     }
 }
 
@@ -1490,6 +1579,10 @@ class ClassNamePragmaNode extends PragmaNode {
 
         state.className = paramMatch[1];
     }
+
+    getFormattedLines() {
+        return [`%class ${this.paramsToken?.lexeme.trim()};`];
+    }
 }
 
 class WalkersPragmaNode extends PragmaNode {
@@ -1547,6 +1640,11 @@ class WalkersPragmaNode extends PragmaNode {
         // The first walker is considered the default walker
         state.defaultWalker = this.#walkers[0].name;
         state.walkersPragmaDefined = true;
+    }
+
+    getFormattedLines() {
+        const walkernames = this.#walkers.map(walker => walker.name).join(' ');
+        return [`%walkers ${walkernames};`];
     }
 }
 
@@ -1644,6 +1742,10 @@ class DefaultWalkerPragmaNode extends PragmaNode {
 
         return null;
     }
+
+    getFormattedLines() {
+        return [`%default_walker ${this.#walkerReferenceToken.lexeme.trim()};`];
+    }
 }
 
 class MembersPragmaNode extends PragmaNode {
@@ -1731,6 +1833,10 @@ class MembersPragmaNode extends PragmaNode {
 
         return null;
     }
+
+    getFormattedLines() {
+        return [`%members ${this.#walkerNameToken.lexeme.trim()}`];
+    }
 }
 
 class AssociativityPragmaNode extends PragmaNode {
@@ -1804,6 +1910,12 @@ class AssociativityPragmaNode extends PragmaNode {
         return defObj
             ? { type: 'token', name: defObj.lexeme }
             : null;
+    }
+
+    getFormattedLines() {
+        const tokenNames = this.#tokenNameTokens.map(tok => tok.lexeme);
+
+        return [`%${this.name} ${tokenNames.join(' ')};`];
     }
 }
 
@@ -1880,7 +1992,7 @@ class FunctionPragmaNode extends PragmaNode {
         state.addForwardReference(
             funcdef.ruleName,
             'rule',
-            funcdef.RuleNameToken.range
+            funcdef.ruleNameToken.range
         );
 
         // Add forward reference to code block
@@ -1895,6 +2007,11 @@ class FunctionPragmaNode extends PragmaNode {
         if (character > this.paramsToken.range.start.character) {
             return this.#functionDefinition?.getElementForDefinitionsAt(character);
         }
+    }
+
+    getFormattedLines() {
+        const funcDefLines = this.#functionDefinition.getFormattedLines();
+        return [`%function ${funcDefLines[0]};`];
     }
 }
 
@@ -1947,7 +2064,7 @@ class FunctionDefinitionNode extends ASTNode {
         return `${this.ruleName}::${this.walkerName}::${this.functionName}`
     }
 
-    get RuleNameToken() {
+    get ruleNameToken() {
         return this.#ruleNameToken;
     }
 
@@ -1981,6 +2098,10 @@ class FunctionDefinitionNode extends ASTNode {
         }
 
         return null;
+    }
+
+    getFormattedLines() {
+        return [`${this.ruleName} ${this.walkerName}::${this.functionName}(${this.#allParamsToken?.lexeme ?? ''}) -> ${this.#returnTypeToken.lexeme}`];
     }
 }
 
@@ -2033,13 +2154,13 @@ class RuleNode extends MultilineASTNode {
         return this.#nameToken.lexeme;
     }
 
-    get definition() {
-        return this.#definitionToken.lexeme;
-    }
+    // get definition() {
+    //     return this.#definitionToken.lexeme;
+    // }
 
-    get definitionToken() {
-        return this.#definitionToken;
-    }
+    // get definitionToken() {
+    //     return this.#definitionToken;
+    // }
 
     /** @type {NodeParser} */
     parse(state) {
@@ -2188,22 +2309,51 @@ class RuleNode extends MultilineASTNode {
 
         return null;
     }
+
+    getFormattedLines() {
+        const ruleElements = [this.name];
+        if (this.#aliasToken) {
+            ruleElements.push(`(${this.#aliasToken.lexeme})`);
+        }
+        ruleElements.push(':=');
+
+        this.#ruleDefElements.forEach(item => {
+            ruleElements.push(item.element.lexeme);
+            if (item.alias) {
+                ruleElements.push(`(${item.alias.lexeme})`);
+            }
+        });
+
+        let ruleLineText = ruleElements.join(' ');
+        ruleLineText += (this.#terminatorToken ? ';' : '');
+
+        return [ruleLineText];
+    }
 }
 
 class CommentNode extends ASTNode {
+    /** @type {string} */
+    #lineText;
+
     constructor(state) {
         super('comment', fullLineRange(state));
     }
 
     /** @type {NodeParser} */
     parse(state) {
+        this.#lineText = `// PRETTY COMMENT: ${state.lineText}`;
+    }
 
-
+    getFormattedLines() {
+        return [this.#lineText];
     }
 }
 
 class CodeBlockNode extends MultilineASTNode {
+    /** @type {string} */
     #name;
+    /** @type {string[]} */
+    #lines;
 
     /**
      * 
@@ -2227,6 +2377,8 @@ class CodeBlockNode extends MultilineASTNode {
         // Separated by ::
         const codeBlockName = `${state.inRuleDef ? state.ruleDefName + '::' : ''}${state.codeBlockName.className}::${state.codeBlockName.functionName}`;
         this.#name = codeBlockName;
+
+        this.#lines = [];
     }
 
     get name() {
@@ -2269,11 +2421,36 @@ class CodeBlockNode extends MultilineASTNode {
 
         return this;
     }
+
+    /**
+     * Appends a string to this code block's lines
+     * @param {string} lineText
+     */
+    appendLine(lineText) {
+        this.#lines.push(lineText);
+    }
+
+    getFormattedLines() {
+        const formattedLines = [];
+        formattedLines.push('%{');
+
+        // Reformat code block lines to be indented
+        // four spaces, and so there.
+        const codeBlockLines = this.#lines.map(
+            lineText => lineText.slice(0, 4) === '    '
+                ? lineText
+                : '    ' + lineText
+        );
+        formattedLines.push(...codeBlockLines);
+
+        formattedLines.push('%}');
+        return formattedLines;
+    }
 }
 
 class CodeBlockNameNode extends ASTNode {
     #classnameToken;
-    #functionnameToken;
+    #functionNameToken;
     #ruleDefName;
 
     /**
@@ -2287,7 +2464,7 @@ class CodeBlockNameNode extends ASTNode {
         // - [1] class (walker) name
         // - [2] function name
         this.#classnameToken = lexicalTokenFromLine(state, 1);
-        this.#functionnameToken = lexicalTokenFromLine(state, 2);
+        this.#functionNameToken = lexicalTokenFromLine(state, 2);
         // A code block name can only appear in a rule definition
         this.#ruleDefName = state.ruleDefName;
     }
@@ -2303,8 +2480,8 @@ class CodeBlockNameNode extends ASTNode {
     }
 
     get functionName() {
-        return this.#functionnameToken
-            ? this.#functionnameToken.lexeme
+        return this.#functionNameToken
+            ? this.#functionNameToken.lexeme
             : 'go';
     }
 
@@ -2326,8 +2503,8 @@ class CodeBlockNameNode extends ASTNode {
             //const funcFullName = `${state.ruleDefName}::${this.className}::${this.functionName}`;
             const funcFullName = this.name;
             if (!state.lookupDefinition({ type: 'function', name: funcFullName })) {
-                const startColumn = this.#functionnameToken.range.start.character;
-                const endColumn = this.#functionnameToken.range.end.character;
+                const startColumn = this.#functionNameToken.range.start.character;
+                const endColumn = this.#functionNameToken.range.end.character;
 
                 state.addError(
                     `A function called ${this.functionName} has not been defined for the walker ${this.className} and the rule ${state.ruleDefName}`,
@@ -2351,10 +2528,14 @@ class CodeBlockNameNode extends ASTNode {
             return { type: 'walker', name: this.#classnameToken.lexeme };
         }
 
-        if (isCharacterInsideToken(this.#functionnameToken, character)) {
+        if (isCharacterInsideToken(this.#functionNameToken, character)) {
             return { type: 'function', name: this.name };
         }
 
         return null;
+    }
+
+    getFormattedLines() {
+        return [`@${this.className}${this.#functionNameToken ? '::' + this.functionName : ''}`];
     }
 }
