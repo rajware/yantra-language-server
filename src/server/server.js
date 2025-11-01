@@ -66,7 +66,8 @@ connection.onInitialize((params) => {
       },
       documentFormattingProvider: true,
       referencesProvider: true,
-      renameProvider: true
+      renameProvider: true,
+      documentSymbolProvider: true
     }
   };
 });
@@ -188,6 +189,16 @@ connection.onRenameRequest((params) => {
   return workspaceEdit;
 });
 
+connection.onDocumentSymbol((params) => {
+  const { textDocument } = params;
+  const document = documents.get(textDocument.uri);
+  if (!document) return [];
+
+  const parser = parserCache.get(textDocument.uri);
+  if (!parser || parser.status !== ParserStatus.Ready) return [];
+
+  return parser.getDocumentSymbols();
+});
 
 function updateDiagnostics(document) {
   let documentParser = parserCache.get(document.uri);

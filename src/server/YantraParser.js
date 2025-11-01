@@ -130,8 +130,17 @@
  * An object that suggests a rename, with newText replacing
  * whatever exists in the range.
  * @typedef {Object} TextEdit
- * @property {Range} range - The range of text to replace
+ * @property {range} range - The range of text to replace
  * @property {string} newText - The replacement text
+ */
+
+/**
+ * @typedef {Object} DocumentSymbol
+ * @property {string} name
+ * @property {SymbolKind} kind - SymbolKind enum (e.g., 12 = Function, 5 = Class)
+ * @property {range} range
+ * @property {range} selectionRange
+ * @property {DocumentSymbol[]} [children]
  */
 //#endregion
 
@@ -228,6 +237,40 @@ const CompletionItemKind = {
     Event: 23,
     Operator: 24,
     TypeParameter: 25
+};
+
+/**
+ * Enumeration of DocumentSymbol kinds.
+ * @readonly 
+ * @enum {Number}
+ */
+const SymbolKind = {
+    File: 1,
+    Module: 2,
+    Namespace: 3,
+    Package: 4,
+    Class: 5,
+    Method: 6,
+    Property: 7,
+    Field: 8,
+    Constructor: 9,
+    Enum: 10,
+    Interface: 11,
+    Function: 12,
+    Variable: 13,
+    Constant: 14,
+    String: 15,
+    Number: 16,
+    Boolean: 17,
+    Array: 18,
+    Object: 19,
+    Key: 20,
+    Null: 21,
+    EnumMember: 22,
+    Struct: 23,
+    Event: 24,
+    Operator: 25,
+    TypeParameter: 26
 };
 
 Object.freeze(ErrorSeverity);
@@ -979,6 +1022,95 @@ class ParseState {
         });
 
         return edits;
+    }
+
+    /**
+     * Returns an array of DocumentSymbols, which in turn contain
+     * their own arrays of DocumentSymbols. This can be used to
+     * populate an outline view of a Yantra document.
+     */
+    getDocumentSymbols() {
+        if (this.#status !== ParserStatus.Ready) return defs;
+
+        const docStart = { line: 0, character: 0 };
+        const docEnd = { line: this.#astNodes.length + 1, character: 0 };
+
+        const emptyRange = {
+            start: docStart,
+            end: docStart
+        };
+        const documentRange = {
+            start: docStart,
+            end: docEnd
+        };
+
+        /** @type {DocumentSymbol[]} */
+        const tokenSymbols = {
+            name: 'Tokens',
+            kind: SymbolKind.Namespace,
+            range: documentRange,
+            selectionRange: emptyRange,
+            children: []
+        };
+        this.#addSymbols(tokenSymbols.children, 'token', SymbolKind.Constant);
+
+        const ruleSymbols = {
+            name: 'Rules',
+            kind: SymbolKind.Namespace,
+            range: documentRange,
+            selectionRange: emptyRange,
+            children: []
+        };
+        this.#addSymbols(ruleSymbols.children, 'rule', SymbolKind.Function);
+
+        const walkerSymbols = {
+            name: 'Walkers',
+            kind: SymbolKind.Namespace,
+            range: documentRange,
+            selectionRange: emptyRange,
+            children: []
+        };
+        this.#addSymbols(walkerSymbols.children, 'walker', SymbolKind.Class);
+
+        const functionSymbols = {
+            name: 'Functions',
+            kind: SymbolKind.Namespace,
+            range: documentRange,
+            selectionRange: emptyRange,
+            children: []
+        };
+        this.#addSymbols(functionSymbols.children, 'function', SymbolKind.Method);
+
+        const documentOutline = [
+            tokenSymbols,
+            ruleSymbols,
+            walkerSymbols,
+            functionSymbols
+        ];
+
+        return documentOutline;
+    }
+
+    /**
+     * Adds definitions of a particular type to a DocumentSymbols
+     * array.
+     * @param {DocumentSymbol[]} symbolsArray 
+     * @param {string} definitionType 
+     * @param {SymbolKind} kind
+     */
+    #addSymbols(symbolsArray, definitionType, kind) {
+        const definitionsMap = this.#definitionsMap.get(definitionType);
+        definitionsMap.forEach(
+            (definitions) => definitions.forEach((def) => {
+                symbolsArray.push({
+                    name: def.name,
+                    kind,
+                    range: def.range,
+                    selectionRange: def.range,
+                    children: []
+                });
+            })
+        );
     }
 
     /**
