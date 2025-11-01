@@ -1,0 +1,16 @@
+    // .vscode/tasks.json
+    {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": "build-debug",
+                "type": "shell",
+                "command": "npm run build-debug", 
+                "group": {
+                    "kind": "build",
+                    "isDefault": true
+                },
+                "problemMatcher": []
+            }
+        ]
+    }

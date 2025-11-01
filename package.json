@@ -5,21 +5,39 @@
   "version": "0.0.1",
   "publisher": "rajware",
   "license": "MIT",
-  "engines": {
-    "vscode": "^1.80.0"
+  "icon": "icon.png",
+  "keywords": [
+    "yantra",
+    "language server",
+    "LSP",
+    "grammar",
+    "syntax highlighting",
+    "vscode-extension"
+  ],
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rajware/yantra-language-server"
+  },
+  "bugs": {
+    "url": "https://github.com/rajware/yantra-language-server/issues"
   },
   "files": [
-    "client/",
-    "server/",
-    "syntaxes/",
-    "node_modules/",
+    "dist/extension.js",
+    "dist/server.js",
+    "syntaxes/yantra.tmLanguage.json",
     "language-configuration.json",
-    "package.json",
-    "README.md",
     "LICENSE",
     "icon.png"
   ],
-  "main": "./client/extension.js",
+  "main": "./dist/extension.js",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
   "contributes": {
     "configuration": {
       "title": "Yantra Language Server",
@@ -52,10 +70,17 @@
       }
     ]
   },
-  "scripts": {},
+  "scripts": {
+    "clean": "node scripts/build.js clean",
+    "build-debug": "node scripts/build.js debug",
+    "build-package": "node scripts/build.js package && vsce package -o out/ --readme-path assets/marketplace-README.md"
+  },
   "dependencies": {
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11"
   }
 }

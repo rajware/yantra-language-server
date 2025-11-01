@@ -1,7 +1,5 @@
 # Yantra Language Server
 
-![Yantra Logo](icon.png)
-
 The Yantra Language Server is a Visual Studio Code extension that brings intelligent editing support to the [Yantra grammar language](https://github.com/TantrixAuto/yantra) — a powerful LALR(1) parser generator and compiler compiler written in C++.
 
 This extension is a companion product to the core Yantra toolchain, offering real-time feedback and authoring assistance for `.yantra` grammar files.
@@ -15,14 +13,6 @@ This extension is a companion product to the core Yantra toolchain, offering rea
 - **Configuration**: Adjustable error threshold via `yantra.errorThreshold`.
 - **Formatting**: Document-wide formatting for consistent layout and readability.
 - **Go To Definition**: Finding definitions for tokens, rules, functions and walkers.
-
-
-## 📦 Installation
-
-1. Open Visual Studio Code.
-2. Search for `Yantra Language Server` in the Extensions view.
-3. Click **Install**.
-4. Open any `.yantra` or `.y` file to activate the extension.
 
 
 ## 🧠 About Yantra
@@ -54,21 +44,3 @@ You can configure the extension via VS Code settings:
 ```
 
 This controls how many diagnostics are shown before suppression.
-
-
-## 🛠️ Development Status
-
-This is an early release focused on core editing features. Future updates may include:
-
-- Semantic token support
-- Code actions and quick fixes
-- Go-to-definition and rename support
-
-## 📄 License
-
-MIT License — see [LICENSE](./LICENSE) for details.
-
-
-## 🤝 Contributing
-
-Contributions, feedback, and issue reports are welcome. Please refer to the [Yantra repository](https://github.com/TantrixAuto/yantra) for core language development.
