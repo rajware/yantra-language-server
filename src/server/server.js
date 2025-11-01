@@ -53,7 +53,6 @@ function debounce(fn, delay) {
 }
 
 // Handlers
-
 connection.onInitialize((params) => {
   serverConfig.errThreshold = params.initializationOptions?.errorThreshold ?? 25;
 
@@ -65,7 +64,8 @@ connection.onInitialize((params) => {
         resolveProvider: false,
         triggerCharacters: ['@', '%']
       },
-      documentFormattingProvider: true
+      documentFormattingProvider: true,
+      referencesProvider: true
     }
   };
 });
@@ -98,6 +98,22 @@ connection.onNotification('yantra/errorThresholdChanged', (params) => {
   connection.console.info(`Error threshold updated to ${params.value}`);
 });
 
+connection.onDefinition((params) => {
+  const { textDocument, position } = params;
+  const document = documents.get(textDocument.uri);
+  if (!document) return null;
+
+  const documentParser = parserCache.get(document.uri);
+  if (!documentParser || documentParser.status !== ParserStatus.Ready) return null;
+
+  const definitions = documentParser.getDefinitionsAt(position.line, position.character);
+
+  return definitions.map(def => Location.create(
+    textDocument.uri,
+    Range.create(def.start, def.end)
+  ));
+});
+
 connection.onCompletion((params) => {
   const { textDocument, position } = params;
   const document = documents.get(textDocument.uri);
@@ -125,7 +141,6 @@ connection.onDocumentFormatting((params) => {
   const lines = parser.getFormattedLines();
   if (lines.length === 0) return lines;
 
-  connection.console.info(`Lines:\n${JSON.stringify(lines, ' ')}`);
   return [{
     range: {
       start: { line: 0, character: 0 },
@@ -133,6 +148,24 @@ connection.onDocumentFormatting((params) => {
     },
     newText: lines.join('\n')
   }];
+});
+
+connection.onReferences((params) => {
+  const { textDocument, position, context } = params;
+  const document = documents.get(textDocument.uri);
+  if (!document) return [];
+
+  const parser = parserCache.get(textDocument.uri);
+  if (!parser || parser.status !== ParserStatus.Ready) return [];
+
+  const references = parser.getReferencesForElementAt(
+    position.line, position.character
+  );
+
+  return references.map(def => Location.create(
+    textDocument.uri,
+    Range.create(def.start, def.end)
+  ));
 });
 
 function updateDiagnostics(document) {
@@ -158,22 +191,6 @@ function updateDiagnostics(document) {
 }
 
 const debouncedUpdateDiagnostics = debounce(updateDiagnostics, 300);
-
-connection.onDefinition((params) => {
-  const { textDocument, position } = params;
-  const document = documents.get(textDocument.uri);
-  if (!document) return null;
-
-  const documentParser = parserCache.get(document.uri);
-  if (!documentParser || documentParser.status !== ParserStatus.Ready) return null;
-
-  const definitions = documentParser.getDefinitionsAt(position.line, position.character);
-
-  return definitions.map(def => Location.create(
-    textDocument.uri,
-    Range.create(def.start, def.end)
-  ));
-});
 
 connection.console.info('Yantra Language Server starting...');
 
