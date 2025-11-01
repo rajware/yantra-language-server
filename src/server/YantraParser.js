@@ -2271,7 +2271,7 @@ class FunctionDefinitionNode extends ASTNode {
             refs.push(this.#ruleNameToken);
         }
 
-        if (noderef.type === 'walker' && noderef.name === this.className) {
+        if (noderef.type === 'walker' && noderef.name === this.walkerName) {
             refs.push(this.#walkerNameToken);
         }
 
