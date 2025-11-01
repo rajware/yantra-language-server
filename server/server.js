@@ -1,16 +1,16 @@
-import {
+const {
   createConnection,
   TextDocuments,
   DiagnosticSeverity,
   ProposedFeatures,
   Location,
   Range,
-  URI,
-} from 'vscode-languageserver/node.js';
+  URI
+} = require('vscode-languageserver/node');
 
-import { TextDocument } from 'vscode-languageserver-textdocument';
+const { TextDocument } = require('vscode-languageserver-textdocument');
 
-import { ParserStatus, YantraParser } from './YantraParser.js';
+const { ParserStatus, YantraParser } = require('./YantraParser');
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
@@ -19,7 +19,7 @@ const documents = new TextDocuments(TextDocument);
 
 /** 
  * Per-document parser cache
- * @type {Map<URI, YantraParser} */
+ * @type {Map<URI, YantraParser>} */
 const parserCache = new Map();
 
 /**
@@ -29,10 +29,10 @@ const parserCache = new Map();
 
 /** Server configuration 
  * @type {ServerConfig}
-*/
+ */
 const serverConfig = {
   errThreshold: 25
-}
+};
 
 // Utilities
 function debounce(fn, delay) {
@@ -52,10 +52,8 @@ function debounce(fn, delay) {
   };
 }
 
-
 // Handlers
 
-// Handle initialize
 connection.onInitialize((params) => {
   serverConfig.errThreshold = params.initializationOptions?.errorThreshold ?? 25;
 
@@ -68,24 +66,21 @@ connection.onInitialize((params) => {
         triggerCharacters: ['@', '%']
       },
       documentFormattingProvider: true
-    },
+    }
   };
 });
 
-// Handle document open
 documents.onDidOpen((event) => {
   const doc = event.document;
   connection.console.info(`Opened document ${doc.uri}`);
   updateDiagnostics(doc);
 });
 
-// Handle document change
 documents.onDidChangeContent((change) => {
   const doc = change.document;
   debouncedUpdateDiagnostics(doc);
 });
 
-// Handle document close
 documents.onDidClose((event) => {
   const doc = event.document;
   connection.sendDiagnostics({ uri: doc.uri, diagnostics: [] });
@@ -93,9 +88,8 @@ documents.onDidClose((event) => {
   connection.console.info(`Closed document ${doc.uri}`);
 });
 
-// Handle settings change
 connection.onNotification('yantra/errorThresholdChanged', (params) => {
-  if (serverConfig.errThreshold != params.value) {
+  if (serverConfig.errThreshold !== params.value) {
     serverConfig.errThreshold = params.value;
     parserCache.forEach((parser) => {
       parser.errorThreshold = serverConfig.errThreshold;
@@ -104,7 +98,6 @@ connection.onNotification('yantra/errorThresholdChanged', (params) => {
   connection.console.info(`Error threshold updated to ${params.value}`);
 });
 
-// Handle autocomplete request
 connection.onCompletion((params) => {
   const { textDocument, position } = params;
   const document = documents.get(textDocument.uri);
@@ -121,9 +114,8 @@ connection.onCompletion((params) => {
   return parser.getCompletionsAt(position.line, position.character, lineText);
 });
 
-// Handle document formatting
 connection.onDocumentFormatting((params) => {
-  const { textDocument, options } = params;
+  const { textDocument } = params;
   const document = documents.get(textDocument.uri);
   if (!document) return [];
 
@@ -133,7 +125,7 @@ connection.onDocumentFormatting((params) => {
   const lines = parser.getFormattedLines();
   if (lines.length === 0) return lines;
 
-  connection.console.info(`Lines:\n${JSON.stringify(lines,' ')}`);
+  connection.console.info(`Lines:\n${JSON.stringify(lines, ' ')}`);
   return [{
     range: {
       start: { line: 0, character: 0 },
@@ -143,7 +135,6 @@ connection.onDocumentFormatting((params) => {
   }];
 });
 
-// Diagnostic logic
 function updateDiagnostics(document) {
   let documentParser = parserCache.get(document.uri);
 
@@ -156,34 +147,26 @@ function updateDiagnostics(document) {
   const text = document.getText();
   documentParser.parse(text);
 
-  const diagnostics = documentParser.getErrors().map((yantraerror) => {
-    return {
-      severity: yantraerror.severity,
-      range: yantraerror.range,
-      message: yantraerror.message,
-      source: 'yantra-language-server',
-    }
-  });
+  const diagnostics = documentParser.getErrors().map((yantraerror) => ({
+    severity: yantraerror.severity,
+    range: yantraerror.range,
+    message: yantraerror.message,
+    source: 'yantra-language-server'
+  }));
 
   connection.sendDiagnostics({ uri: document.uri, diagnostics });
 }
 
 const debouncedUpdateDiagnostics = debounce(updateDiagnostics, 300);
 
-// Handle Go to Definition
 connection.onDefinition((params) => {
   const { textDocument, position } = params;
   const document = documents.get(textDocument.uri);
   if (!document) return null;
 
   const documentParser = parserCache.get(document.uri);
-  if (!documentParser || documentParser.status != ParserStatus.Ready) return null;
+  if (!documentParser || documentParser.status !== ParserStatus.Ready) return null;
 
-  // const word = documentParser.getWordAt(position.line, position.character);
-  // if (!word) return null;
-
-  // const definitions = documentParser.getDefinitionLocationsFor(word);
-  // if (!definitions || definitions.length === 0) return null;
   const definitions = documentParser.getDefinitionsAt(position.line, position.character);
 
   return definitions.map(def => Location.create(

@@ -127,7 +127,7 @@
  * @readonly
  * @enum {Number}
  */
-export const ErrorSeverity = {
+/* export */ const ErrorSeverity = {
     Error: 1,
     Warning: 2,
     Information: 3,
@@ -139,7 +139,7 @@ export const ErrorSeverity = {
  * @enum {Symbol}
  * @readonly
  */
-export const ParserStatus = {
+/* export */ const ParserStatus = {
     Initialized: Symbol('init'),
     Parsing: Symbol('parsing'),
     Ready: Symbol('ready')
@@ -666,7 +666,7 @@ class ParseState {
 }
 
 
-export class YantraParser {
+/* export */ class YantraParser {
     /** @type {ParserStatus} */
     #status;
     /** @type {ASTNode[]} */
@@ -2341,11 +2341,16 @@ class CommentNode extends ASTNode {
 
     /** @type {NodeParser} */
     parse(state) {
-        this.#lineText = `// PRETTY COMMENT: ${state.lineText}`;
+        this.#lineText = state.lineText;
     }
 
+    /**
+     * Preseve spaces before //, but ensure one space after it, unless 
+     * immediately followed by a hash.
+     * @returns {string[]}
+     */
     getFormattedLines() {
-        return [this.#lineText];
+        return [this.#lineText.replace(/^(\s*?)\/\/([^\s#])/, "$1// $2")];
     }
 }
 
@@ -2539,3 +2544,9 @@ class CodeBlockNameNode extends ASTNode {
         return [`@${this.className}${this.#functionNameToken ? '::' + this.functionName : ''}`];
     }
 }
+
+module.exports = {
+    ErrorSeverity,
+    ParserStatus,
+    YantraParser
+};

@@ -1,15 +1,12 @@
-import path from 'path';
-import { fileURLToPath } from 'url';
-import * as vscode from 'vscode';
-import { LanguageClient, TransportKind } from 'vscode-languageclient/node.js';
+const path = require('path');
+const vscode = require('vscode');
+const { LanguageClient, TransportKind } = require('vscode-languageclient');
 
 let client;
 let outputChannel;
 
-export async function activate(context) {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  const serverModule = path.join(__dirname, '..', 'server', 'server.js');
+function activate(context) {
+  const serverModule = path.join(__dirname, '..', 'dist', 'server.js');
 
   // Create the output channel
   outputChannel = vscode.window.createOutputChannel('Yantra Language Server');
@@ -41,10 +38,14 @@ export async function activate(context) {
       client.sendNotification('yantra/errorThresholdChanged', { value: newValue });
     }
   });
-
 }
 
-export function deactivate() {
+function deactivate() {
   outputChannel.appendLine('Deactivating Yantra Language Server extension…');
   return client ? client.stop() : undefined;
 }
+
+module.exports = {
+  activate,
+  deactivate
+};

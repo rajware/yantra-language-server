@@ -8,8 +8,18 @@
   "engines": {
     "vscode": "^1.80.0"
   },
+  "files": [
+    "client/",
+    "server/",
+    "syntaxes/",
+    "node_modules/",
+    "language-configuration.json",
+    "package.json",
+    "README.md",
+    "LICENSE",
+    "icon.png"
+  ],
   "main": "./client/extension.js",
-  "type": "module",
   "contributes": {
     "configuration": {
       "title": "Yantra Language Server",
