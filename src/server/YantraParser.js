@@ -125,6 +125,14 @@
  * @property {1|2} [insertTextFormat] - Format of insertText: 1 = plain text, 2 = snippet.
  * @property {{range: range, newText: string}} [textEdit] - Optional text edit to apply.
  */
+
+/**
+ * An object that suggests a rename, with newText replacing
+ * whatever exists in the range.
+ * @typedef {Object} TextEdit
+ * @property {Range} range - The range of text to replace
+ * @property {string} newText - The replacement text
+ */
 //#endregion
 
 //#region Enums
@@ -929,7 +937,7 @@ class ParseState {
                     const rhs = match[3];
                     const bang = match[4] || '';
                     const semicolon = match[5];
-                    result.push(`${ lhs } := ${ rhs }${ bang }${ semicolon } `);
+                    result.push(`${lhs} := ${rhs}${bang}${semicolon} `);
                 } else {
                     result.push(line); // fallback, shouldn't happen
                 }
@@ -954,31 +962,24 @@ class ParseState {
 
     /**
      * Tries to intelligently rename all occurances of an element.
+     * Identifies the element at the specified position, fetches 
+     * all references to it, and returns an array of TextEdit
+     * objects, which look like this: {range:{}, newText: ''}.
      * @param {Number} line - The line where the symbol to be renamed resides
      * @param {*} character - The character position of that symbol
      * @param {*} newName - The new name to be given
      */
-    // renameSymbolAt(line, character, newName) {
-    //     const defs = [];
+    renameSymbolAt(line, character, newName) {
 
-    //     if (this.#status !== ParserStatus.Ready) return defs;
+        const refs = this.getReferencesForElementAt(line, character);
+        if (refs.length === 0) return refs;
 
-    //     if (line < 0 || line > this.#astNodes.length) return defs;
+        const edits = refs.map(range => {
+            return { range, newText: newName };
+        });
 
-    //     const node = this.#astNodes[line];
-    //     if (!node) return defs;
-
-    //     if (!(['walker', 'function', 'token', 'rule'].includes(node.type))) return defs;
-
-
-    //     // const searchElement = node.getReferenceAt(character);
-    //     // if (searchElement) {
-    //     //     const nodeDefs = this.#searchDefinitions(searchElement.type, searchElement.name);
-    //     //     defs.push(...nodeDefs);
-    //     // }
-
-    //     return defs;
-    // }
+        return edits;
+    }
 
     /**
      * Parses the input as a Yantra document.
@@ -1103,7 +1104,7 @@ class ParseState {
 
             if (!defs.has(forwardRef.name)) {
                 this.#addErrorWithRange(
-                    `The ${ forwardRef.type } '${forwardRef.name}' has not been defined`,
+                    `The ${forwardRef.type} '${forwardRef.name}' has not been defined`,
                     ErrorSeverity.Warning,
                     forwardRef.range
                 );
@@ -1393,7 +1394,7 @@ class ParseState {
         }
 
         const defs = this.#definitionsMap.get('function');
-        const funcFilter = new RegExp(`\\w +?::${ prefix } \w * `);
+        const funcFilter = new RegExp(`\\w +?::${prefix} \w * `);
         const funcNames = Array.from(defs.keys())
             .filter(name => funcFilter.test(name))
             .map((name) => {
@@ -1507,7 +1508,7 @@ class ASTNode {
     }
 
     toString() {
-        return `Type: ${ this.type }, Name: ${ this.name } `;
+        return `Type: ${this.type}, Name: ${this.name} `;
     }
 }
 
@@ -1576,7 +1577,7 @@ class TokenNode extends ASTNode {
     }
 
     getFormattedLines() {
-        return [`${ this.name } := ${ this.#valueToken.lexeme }${ this.#negatorToken?.lexeme ?? '' }; `]
+        return [`${this.name} := ${this.#valueToken.lexeme}${this.#negatorToken?.lexeme ?? ''}; `]
     }
 }
 
@@ -1733,7 +1734,7 @@ class WalkersPragmaNode extends PragmaNode {
 
     getFormattedLines() {
         const walkernames = this.#walkers.map(walker => walker.name).join(' ');
-        return [`% walkers ${ walkernames }; `];
+        return [`% walkers ${walkernames}; `];
     }
 
     /**
@@ -1863,7 +1864,7 @@ class DefaultWalkerPragmaNode extends PragmaNode {
     }
 
     getFormattedLines() {
-        return [`% default_walker ${ this.#walkerReferenceToken.lexeme.trim() }; `];
+        return [`% default_walker ${this.#walkerReferenceToken.lexeme.trim()}; `];
     }
 }
 
@@ -1968,7 +1969,7 @@ class MembersPragmaNode extends PragmaNode {
     }
 
     getFormattedLines() {
-        return [`% members ${ this.#walkerNameToken.lexeme.trim() } `];
+        return [`% members ${this.#walkerNameToken.lexeme.trim()} `];
     }
 }
 
@@ -1988,7 +1989,7 @@ class AssociativityPragmaNode extends PragmaNode {
         const paramsMatch = this._matchRepeatingPattern(RepeatedElementPattern.TokenNames);
         if (!paramsMatch || paramsMatch.length === 0) {
             state.addError(
-                `The % ${ this.name } pragma expects one or more valid token names`
+                `The % ${this.name} pragma expects one or more valid token names`
             );
             return;
         }
@@ -2017,7 +2018,7 @@ class AssociativityPragmaNode extends PragmaNode {
             // The token should not be defined at this point
             if (state.lookupDefinition(tokDef)) {
                 state.addError(
-                    `The % ${ this.name } should appear before the definition of the token ${ tokenName } `,
+                    `The % ${this.name} should appear before the definition of the token ${tokenName} `,
                     ErrorSeverity.Warning,
                     startColumn,
                     endColumn
@@ -2059,7 +2060,7 @@ class AssociativityPragmaNode extends PragmaNode {
     getFormattedLines() {
         const tokenNames = this.#tokenNameTokens.map(tok => tok.lexeme);
 
-        return [`% ${ this.name } ${ tokenNames.join(' ') }; `];
+        return [`% ${this.name} ${tokenNames.join(' ')}; `];
     }
 }
 
@@ -2099,7 +2100,7 @@ class FunctionPragmaNode extends PragmaNode {
                 const startColumn = funcdef.walkerNameToken.range.start.character;
                 const endColumn = funcdef.walkerNameToken.range.end.character;
                 state.addError(
-                    `A walker called ${ funcdef.walkerName } has not been defined`,
+                    `A walker called ${funcdef.walkerName} has not been defined`,
                     ErrorSeverity.Error,
                     startColumn,
                     endColumn
@@ -2114,7 +2115,7 @@ class FunctionPragmaNode extends PragmaNode {
 
         if (state.lookupDefinition(funcdef)) {
             state.addError(
-                `A function called ${ funcdef.functionName } has already been defined for the walker ${ funcdef.walkerName } and the rule ${ funcdef.ruleName } `,
+                `A function called ${funcdef.functionName} has already been defined for the walker ${funcdef.walkerName} and the rule ${funcdef.ruleName} `,
                 ErrorSeverity.Error,
                 funcNameStartColumn,
                 funcNameEndColumn
@@ -2165,7 +2166,7 @@ class FunctionPragmaNode extends PragmaNode {
 
     getFormattedLines() {
         const funcDefLines = this.#functionDefinition.getFormattedLines();
-        return [`% function ${ funcDefLines[0] }; `];
+        return [`% function ${funcDefLines[0]}; `];
     }
 }
 
@@ -2215,7 +2216,7 @@ class FunctionDefinitionNode extends ASTNode {
     }
 
     get name() {
-        return `${ this.ruleName }::${ this.walkerName }::${ this.functionName } `
+        return `${this.ruleName}::${this.walkerName}::${this.functionName} `
     }
 
     get ruleNameToken() {
@@ -2282,7 +2283,7 @@ class FunctionDefinitionNode extends ASTNode {
     }
 
     getFormattedLines() {
-        return [`${ this.ruleName } ${ this.walkerName }::${ this.functionName } (${ this.#allParamsToken?.lexeme ?? '' }) -> ${ this.#returnTypeToken.lexeme } `];
+        return [`${this.ruleName} ${this.walkerName}::${this.functionName} (${this.#allParamsToken?.lexeme ?? ''}) -> ${this.#returnTypeToken.lexeme} `];
     }
 }
 
@@ -2520,14 +2521,14 @@ class RuleNode extends MultilineASTNode {
     getFormattedLines() {
         const ruleElements = [this.name];
         if (this.#aliasToken) {
-            ruleElements.push(`(${ this.#aliasToken.lexeme })`);
+            ruleElements.push(`(${this.#aliasToken.lexeme})`);
         }
         ruleElements.push(':=');
 
         this.#ruleDefElements.forEach(item => {
             ruleElements.push(item.element.lexeme);
             if (item.alias) {
-                ruleElements.push(`(${ item.alias.lexeme })`);
+                ruleElements.push(`(${item.alias.lexeme})`);
             }
         });
 
@@ -2587,7 +2588,7 @@ class CodeBlockNode extends MultilineASTNode {
         // - The walker name with which this code block is associated
         // - The function name for this code block
         // Separated by ::
-        const codeBlockName = `${ state.inRuleDef ? state.ruleDefName + '::' : '' }${ state.codeBlockName.className }::${ state.codeBlockName.functionName } `;
+        const codeBlockName = `${state.inRuleDef ? state.ruleDefName + '::' : ''}${state.codeBlockName.className}::${state.codeBlockName.functionName} `;
         this.#name = codeBlockName;
 
         this.#lines = [];
@@ -2684,7 +2685,7 @@ class CodeBlockNameNode extends ASTNode {
     get name() {
         // The full function name is in the form:
         //   RULENAME::WALKERNAME::functionname
-        return `${ this.#ruleDefName }::${ this.className }::${ this.functionName } `
+        return `${this.#ruleDefName}::${this.className}::${this.functionName} `
     }
 
     get className() {
@@ -2719,7 +2720,7 @@ class CodeBlockNameNode extends ASTNode {
                 const endColumn = this.#functionNameToken.range.end.character;
 
                 state.addError(
-                    `A function called ${ this.functionName } has not been defined for the walker ${ this.className } and the rule ${ state.ruleDefName } `,
+                    `A function called ${this.functionName} has not been defined for the walker ${this.className} and the rule ${state.ruleDefName} `,
                     ErrorSeverity.Warning,
                     startColumn,
                     endColumn
@@ -2763,7 +2764,7 @@ class CodeBlockNameNode extends ASTNode {
     }
 
     getFormattedLines() {
-        return [`@${ this.className }${ this.#functionNameToken ? '::' + this.functionName : '' } `];
+        return [`@${this.className}${this.#functionNameToken ? '::' + this.functionName : ''} `];
     }
 }
 

@@ -65,7 +65,8 @@ connection.onInitialize((params) => {
         triggerCharacters: ['@', '%']
       },
       documentFormattingProvider: true,
-      referencesProvider: true
+      referencesProvider: true,
+      renameProvider: true
     }
   };
 });
@@ -167,6 +168,26 @@ connection.onReferences((params) => {
     Range.create(def.start, def.end)
   ));
 });
+
+connection.onRenameRequest((params) => {
+  const { textDocument, position, newName } = params;
+  const document = documents.get(textDocument.uri);
+  if (!document) return null;
+
+  const parser = parserCache.get(textDocument.uri);
+  if (!parser || parser.status !== ParserStatus.Ready) return null;
+
+  const edits = parser.renameSymbolAt(
+    position.line,
+    position.character,
+    newName
+  );
+
+  const workspaceEdit = { changes: {} };
+  workspaceEdit.changes[document.uri] = edits;
+  return workspaceEdit;
+});
+
 
 function updateDiagnostics(document) {
   let documentParser = parserCache.get(document.uri);
