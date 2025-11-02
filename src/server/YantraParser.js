@@ -135,12 +135,21 @@
  */
 
 /**
+ * Data structure for populating document outline view.
  * @typedef {Object} DocumentSymbol
  * @property {string} name
  * @property {SymbolKind} kind - SymbolKind enum (e.g., 12 = Function, 5 = Class)
  * @property {range} range
  * @property {range} selectionRange
  * @property {DocumentSymbol[]} [children]
+ */
+
+/**
+ * Semantic token
+ * @typedef {Object} SemanticToken
+ * @property {range} range
+ * @property {SemanticTokenType} tokenType
+ * @property {SemanticTokenModifier[]} tokenModifiers
  */
 //#endregion
 
@@ -273,13 +282,47 @@ const SymbolKind = {
     TypeParameter: 26
 };
 
+/**
+ * Enumeration of semantic token types supported
+ * by this parser. The server must declare them
+ * in the same order.
+ * @readonly
+ * @enum {Number}
+ */
+const SemanticTokenType = {
+    Keyword: 0,
+    Class: 1,
+    Method: 2,
+    Function: 3,
+    Variable: 4,
+    Operator: 5,
+    String: 6,
+    Parameter: 7,
+    Comment: 8
+};
+
+/**
+ * Enumeration of semantic token modifiers supported
+ * by this parser. The server must declare them in
+ * the same order.
+ * @readonly
+ * @enum {Number}
+ */
+const SemanticTokenModifier = {
+    Declaration: 0,
+    Definition: 1,
+    ReadOnly: 2
+};
+
 Object.freeze(ErrorSeverity);
 Object.freeze(ParserStatus);
 Object.freeze(SyntaxPattern);
 Object.freeze(ElementPattern);
 Object.freeze(RepeatedElementPattern);
 Object.freeze(CompletionItemKind);
-
+Object.freeze(SymbolKind);
+Object.freeze(SemanticTokenType);
+Object.freeze(SemanticTokenModifier);
 //#endregion
 
 //#region Utility Functions
@@ -656,22 +699,6 @@ class ParseState {
         this.codeBlockName = undefined;
     }
 
-    // /**
-    //  * Indicate the start of a new rule definition,
-    //  * with the specified name
-    //  * @param {string} name 
-    //  */
-    // startRuleDefWithCodeBlocks(name) {
-    //     this.inRuleDef = true;
-    //     this.ruleDefName = name;
-    //     // this.ruleDefLineNumber = this.line;
-
-    //     // A rule defininition must be followed by
-    //     // a named or anonymous code block.
-    //     this.expectNamedCodeBlock = true;
-    //     this.expectCodeBlock = true;
-    // }
-
     /**
      * Indicate the start of a new rule definition,
      * with the specified name
@@ -679,24 +706,14 @@ class ParseState {
      */
     startMultilineRule(rule) {
         this.#currentRule = rule;
-        //rule.range.end = undefined;
-        //COMEBACKHERE
-        // this.inRuleDef = true;
-        // this.ruleDefName = rule.name;
-        // this.ruleDefLineNumber = this.line;
 
         this.expectNamedCodeBlock = true;
         this.expectCodeBlock = true;
-
     }
 
     resetRuleDef() {
         this.#currentRule?.end(this);
         this.#currentRule = undefined;
-
-        // this.inRuleDef = false
-        // this.ruleDefName = '';
-        // this.ruleDefLineNumber = -1;
     }
 }
 
@@ -737,6 +754,29 @@ class ParseState {
         "action": (state) => this.#parseRuleDefinition(state)
     }];
 
+    /**
+     * The semantic token types currently supported by this
+     * parser, in the correct order.
+     * @readonly
+     * @returns {string[]}
+     */
+    static get semanticTokenTypes() {
+        return [
+            'keyword', 'class', 'method', 'function',
+            'variable', 'operator', 'string', 'parameter',
+            'comment'
+        ];
+    }
+
+    /**
+     * The semantic token modifiers currently supported by
+     * this parser, in the correct order.
+     * @readonly
+     * @returns {string[]}
+     */
+    static get semanticTokenModifiers() {
+        return ['declaration', 'definition', 'readonly'];
+    }
 
     constructor() {
         this.clear();
@@ -841,7 +881,7 @@ class ParseState {
             return defs;
         }
 
-        this.#astNodes.forEach((node, i) => {
+        this.#astNodes.forEach((node) => {
             if (!node) return;
 
             const allReferences = node.getReferencesFor(searchElement);
@@ -1028,9 +1068,10 @@ class ParseState {
      * Returns an array of DocumentSymbols, which in turn contain
      * their own arrays of DocumentSymbols. This can be used to
      * populate an outline view of a Yantra document.
+     * @returns {DocumentSymbol[]}
      */
     getDocumentSymbols() {
-        if (this.#status !== ParserStatus.Ready) return defs;
+        if (this.#status !== ParserStatus.Ready) return [];
 
         const docStart = { line: 0, character: 0 };
         const docEnd = { line: this.#astNodes.length + 1, character: 0 };
@@ -1111,6 +1152,24 @@ class ParseState {
                 });
             })
         );
+    }
+
+    /**
+     * Gets all semantic tokens.
+     * @returns {SemanticToken[]}
+     */
+    getSemanticTokens() {
+        const sTokens = [];
+        if (this.#status !== ParserStatus.Ready) return sTokens;
+
+        this.#astNodes.forEach(node => {
+            const tokArr = node?.getSemanticTokens();
+            if (tokArr && tokArr.length > 0) {
+                sTokens.push(...tokArr);
+            }
+        });
+
+        return sTokens;
     }
 
     /**
@@ -1526,7 +1585,7 @@ class ParseState {
         }
 
         const defs = this.#definitionsMap.get('function');
-        const funcFilter = new RegExp(`\\w+?::${prefix}\w*`);
+        const funcFilter = new RegExp(`\\w+?::${prefix}\\w*`);
         const funcNames = Array.from(defs.keys())
             .filter(name => funcFilter.test(name))
             .map((name) => {
@@ -1639,6 +1698,16 @@ class ASTNode {
         return [];
     }
 
+    /**
+     * Returns any semantic tokens that a node wants to 
+     * expose. They should be in ascending order of 
+     * range.
+     * @returns {SemanticToken[]}
+     */
+    getSemanticTokens() {
+        return [];
+    }
+
     toString() {
         return `AST Node Type: ${this.type}, Name: ${this.name}`;
     }
@@ -1711,10 +1780,41 @@ class TokenNode extends ASTNode {
     getFormattedLines() {
         return [`${this.name} := ${this.#valueToken.lexeme}${this.#negatorToken?.lexeme ?? ''};`]
     }
+
+    /** @returns {SemanticToken[]} */
+    getSemanticTokens() {
+        /** @type {SemanticToken[]} */
+        const semToks = [
+            {
+                range: this.#nameToken.range,
+                tokenType: SemanticTokenType.Variable,
+                tokenModifiers: [SemanticTokenModifier.Declaration]
+            },
+            {
+                range: this.#assignmentOperatorToken.range,
+                tokenType: SemanticTokenType.Operator,
+                tokenModifiers: []
+            },
+            {
+                range: this.#valueToken.range,
+                tokenType: SemanticTokenType.String,
+                tokenModifiers: [SemanticTokenModifier.ReadOnly]
+            }
+        ];
+
+        if (this.#negatorToken) {
+            semToks.push({
+                range: this.#negatorToken.range,
+                tokenType: SemanticTokenType.Operator,
+                tokenModifiers: []
+            });
+        }
+
+        return semToks;
+    }
 }
 
 class PragmaNode extends ASTNode {
-    #pragma
     #name
     #params
     #terminator
@@ -1755,6 +1855,24 @@ class PragmaNode extends ASTNode {
             : ensureOnly(repeatingPattern).test(paramsToken.lexeme)
                 ? Array.from(paramsToken.lexeme.matchAll(repeatingPattern))
                 : undefined
+    }
+
+    /**
+     * Marks the pragma name as a keyword.
+     * If overriden, should call super() and push these tokens first.
+     * @returns {SemanticToken[]}
+     */
+    getSemanticTokens() {
+        /** @type {SemanticToken} */
+        const pragmaNameTok = {
+            range: this.#name.range,
+            tokenType: SemanticTokenType.Keyword,
+            tokenModifiers: []
+        };
+
+        pragmaNameTok.range.start.character--;
+
+        return [pragmaNameTok];
     }
 }
 
@@ -1884,6 +2002,24 @@ class WalkersPragmaNode extends PragmaNode {
         refs.push(ref);
         return refs;
     }
+
+    getSemanticTokens() {
+        /** @type {SemanticToken[]} */
+        const semToks = [];
+
+        const pragmaToks = super.getSemanticTokens();
+        semToks.push(...pragmaToks);
+
+        this.#walkers.forEach(walker => {
+            semToks.push({
+                range: walker.range,
+                tokenType: SemanticTokenType.Class,
+                tokenModifiers: [SemanticTokenModifier.Declaration]
+            });
+        });
+
+        return semToks;
+    }
 }
 
 class WalkerNode extends ASTNode {
@@ -1998,6 +2134,23 @@ class DefaultWalkerPragmaNode extends PragmaNode {
     getFormattedLines() {
         return [`%default_walker ${this.#walkerReferenceToken.lexeme.trim()};`];
     }
+
+    /** @returns {SemanticToken[]} */
+    getSemanticTokens() {
+        /** @type {SemanticToken[]} */
+        const semToks = [];
+
+        const pragmaToks = super.getSemanticTokens();
+        semToks.push(...pragmaToks);
+
+        semToks.push({
+            range: this.#walkerReferenceToken.range,
+            tokenType: SemanticTokenType.Class,
+            tokenModifiers: []
+        });
+
+        return semToks;
+    }
 }
 
 class MembersPragmaNode extends PragmaNode {
@@ -2103,6 +2256,22 @@ class MembersPragmaNode extends PragmaNode {
     getFormattedLines() {
         return [`%members ${this.#walkerNameToken.lexeme.trim()}`];
     }
+
+    getSemanticTokens() {
+        /** @type {SemanticToken[]} */
+        const semToks = [];
+
+        const pragmaToks = super.getSemanticTokens();
+        semToks.push(...pragmaToks);
+
+        semToks.push({
+            range: this.#walkerNameToken.range,
+            tokenType: SemanticTokenType.Class,
+            tokenModifiers: []
+        });
+
+        return semToks;
+    }
 }
 
 class AssociativityPragmaNode extends PragmaNode {
@@ -2193,6 +2362,25 @@ class AssociativityPragmaNode extends PragmaNode {
         const tokenNames = this.#tokenNameTokens.map(tok => tok.lexeme);
 
         return [`%${this.name} ${tokenNames.join(' ')};`];
+    }
+
+    getSemanticTokens() {
+        /** @type {SemanticToken[]} */
+        const semToks = [];
+
+        const pragmaToks = super.getSemanticTokens();
+        semToks.push(...pragmaToks);
+
+        this.#tokenNameTokens.forEach(ytokenname => {
+            semToks.push({
+                range: ytokenname.range,
+                tokenType: SemanticTokenType.Variable,
+                tokenModifiers: []
+            });
+        });
+
+        return semToks;
+
     }
 }
 
@@ -2299,6 +2487,19 @@ class FunctionPragmaNode extends PragmaNode {
     getFormattedLines() {
         const funcDefLines = this.#functionDefinition.getFormattedLines();
         return [`%function ${funcDefLines[0]};`];
+    }
+
+    getSemanticTokens() {
+        /** @type {SemanticToken[]} */
+        const semToks = [];
+
+        const pragmaToks = super.getSemanticTokens();
+        semToks.push(...pragmaToks);
+
+        const funcDefToks = this.#functionDefinition.getSemanticTokens();
+        semToks.push(...funcDefToks);
+
+        return semToks;
     }
 }
 
@@ -2416,6 +2617,27 @@ class FunctionDefinitionNode extends ASTNode {
 
     getFormattedLines() {
         return [`${this.ruleName} ${this.walkerName}::${this.functionName} (${this.#allParamsToken?.lexeme ?? ''}) -> ${this.#returnTypeToken.lexeme};`];
+    }
+
+    getSemanticTokens() {
+        /** @type {SemanticToken[]} */
+        const semToks = [];
+
+        semToks.push({
+            range: this.#ruleNameToken.range,
+            tokenType: SemanticTokenType.Function,
+            tokenModifiers: []
+        });
+
+        if (this.#walkerNameToken) {
+            semToks.push({
+                range: this.#walkerNameToken.range,
+                tokenType: SemanticTokenType.Method,
+                tokenModifiers: [SemanticTokenModifier.Declaration]
+            });
+        }
+
+        return semToks;
     }
 }
 
@@ -2669,6 +2891,54 @@ class RuleNode extends MultilineASTNode {
 
         return [ruleLineText];
     }
+
+    getSemanticTokens() {
+        /** @type {SemanticToken[]} */
+        const semToks = [];
+
+        semToks.push({
+            range: this.#nameToken.range,
+            tokenType: SemanticTokenType.Function,
+            tokenModifiers: [
+                SemanticTokenModifier.Declaration,
+                SemanticTokenModifier.Definition
+            ]
+        });
+
+        if (this.#aliasToken) {
+            semToks.push({
+                range: this.#aliasToken.range,
+                tokenType: SemanticTokenType.Parameter,
+                tokenModifiers: []
+            });
+        }
+
+        semToks.push({
+            range: this.#assignOpToken.range,
+            tokenType: SemanticTokenType.Operator,
+            tokenModifiers: []
+        });
+
+        this.#ruleDefElements.forEach(rdef => {
+            semToks.push({
+                range: rdef.element.range,
+                tokenType: isYantraRuleName(rdef.element.lexeme)
+                    ? SemanticTokenType.Function
+                    : SemanticTokenType.Variable,
+                tokenModifiers: []
+            });
+
+            if (rdef.alias) {
+                semToks.push({
+                    range: rdef.alias.range,
+                    tokenType: SemanticTokenType.Parameter,
+                    tokenModifiers: []
+                });
+            }
+        });
+
+        return semToks;
+    }
 }
 
 class CommentNode extends ASTNode {
@@ -2691,6 +2961,16 @@ class CommentNode extends ASTNode {
      */
     getFormattedLines() {
         return [this.#lineText.replace(/^(\s*?)\/\/([^\s#])/, "$1// $2")];
+    }
+
+    getSemanticTokens() {
+        return [
+            {
+                range: this.range,
+                tokenType: SemanticTokenType.Comment,
+                tokenModifiers: []
+            }
+        ];
     }
 }
 
@@ -2896,6 +3176,27 @@ class CodeBlockNameNode extends ASTNode {
 
     getFormattedLines() {
         return [`@${this.className}${this.#functionNameToken ? '::' + this.functionName : ''}`];
+    }
+
+    getSemanticTokens() {
+        /** @type {SemanticToken[]} */
+        const semToks = [];
+
+        semToks.push({
+            range: this.#classnameToken.range,
+            tokenType: SemanticTokenType.Class,
+            tokenModifiers: []
+        });
+
+        if (this.#functionNameToken) {
+            semToks.push({
+                range: this.#functionNameToken.range,
+                tokenType: SemanticTokenType.Function,
+                tokenModifiers: [SemanticTokenModifier.Definition]
+            });
+        }
+
+        return semToks;
     }
 }
 
