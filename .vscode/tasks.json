@@ -5,12 +5,17 @@
             {
                 "label": "build-debug",
                 "type": "shell",
-                "command": "npm run build-debug", 
+                "command": "npm run build-debug",
                 "group": {
                     "kind": "build",
                     "isDefault": true
                 },
-                "problemMatcher": []
+                "problemMatcher": [],
+                "presentation": {
+                    "reveal": "silent",
+                    "revealProblems": "onProblem",
+                    "close": true
+                }
             }
         ]
     }
