@@ -4,7 +4,7 @@
  * A position in a document.
  * @typedef {Object} position
  * @property {Number} line - Zero-based line number in document.
- * @property {string} character - Zero-based character position in line.
+ * @property {Number} character - Zero-based character position in line.
 */
 
 /**
@@ -53,7 +53,6 @@
 /**
  * A line parser function
  * @callback LineParser
- * @this {YantraParser}
  * @param {ParseState} state
  * @returns {ASTNode|undefined}
  */
@@ -65,6 +64,12 @@
  * @returns {void}
  */
 
+/**
+ * A named reference to an element.
+ * @typedef {Object} Reference
+ * @property {string} type - Can be rule, token, function or walker
+ * @property {string} name
+ */
 
 /**
  * A forward reference to a token or rule
@@ -100,17 +105,11 @@
  * @property {string} defaultWalkerName
  * @property {AddErrorWithRange} addErrorWithRange
  * @property {(def:ASTNode) => void} addDefinition
- * @property {(def:ASTNode) => boolean } lookupDefinition
+ * @property {(def:Reference) => boolean } lookupReference
  * @property {(name:string, type:string, range:range) => void} addForwardReference
  * @property {(name:string, type:string) => void} removeForwardReference
  */
 
-/**
- * A named reference to an element.
- * @typedef {Object} Reference
- * @property {string} type - Can be rule, token, function or walker
- * @property {string} name
- */
 
 /**
  * A completion item returned by the language server.
@@ -397,7 +396,7 @@ const lexicalTokenFromLine = (state, matchIndex) => {
 
 /**
  * Creates a lexical token from a scanner match, and offsets the range. 
- * @param {RegExpExecArray} matches - A scanner match
+ * @param {RegExpMatchArray} matches - A scanner match
  * @param {Number} matchIndex - The index to be turned into a LexicalToken
  * @param {Number} line - The line for the LexicalToken range
  * @param {Number} characterOffset - The offset to adjust the match column
@@ -531,7 +530,7 @@ class ParseState {
         this.#globalState = globalState;
         this.#lineText = "";
         this.#line = 0;
-        this.#matches = [];
+        this.#matches = undefined;
         this.#errorCount = 0;
 
     }
@@ -597,7 +596,7 @@ class ParseState {
     startNewLine(line, lineText) {
         this.#line = line;
         this.#lineText = lineText;
-        this.#matches = [];
+        this.#matches = undefined;
     }
 
     /**
@@ -648,19 +647,19 @@ class ParseState {
 
     /**
      * Adds a definition to the current line
-     * @param {YantraDefinition} def
+     * @param {ASTNode} def
      */
     addDefinition(def) {
         this.#globalState.addDefinition(def);
     }
 
     /**
-     * Looks up a definition. 
-     * @param {YantraDefinition} def
+     * Looks up a reference in current definitions. 
+     * @param {Reference} ref
      * @returns {boolean}
      */
-    lookupDefinition(def) {
-        return this.#globalState.lookupDefinition(def);
+    lookupReference(ref) {
+        return this.#globalState.lookupReference(ref);
     }
 
     /**
@@ -676,8 +675,7 @@ class ParseState {
     /**
      * Removes any forward references for the given name and type.
      * @param {string} name 
-     * @param {string} type 
-     * @param {range} range 
+     * @param {string} type
      */
     removeForwardReference(name, type) {
         this.#globalState.removeForwardReference(name, type);
@@ -730,29 +728,10 @@ class ParseState {
     /** @type {YantraError[]} */
     #errors;
     /** @type {Number} */
-    #errorThreshold = 25;
+    #errorThreshold;
 
     /** @type {LinePattern[]} */
-    #linePatterns = [{
-        "type": 'comment',
-        "pattern": SyntaxPattern.Comment,
-        "action": (state) => this.#parseComment(state)
-    },
-    {
-        "type": 'pragma',
-        "pattern": SyntaxPattern.Pragma,
-        "action": (state) => this.#parsePragma(state)
-    },
-    {
-        "type": 'token',
-        "pattern": SyntaxPattern.TokenDefinition,
-        "action": (state) => this.#parseTokenDefinition(state)
-    },
-    {
-        'type': 'rule',
-        "pattern": SyntaxPattern.RuleDefinition,
-        "action": (state) => this.#parseRuleDefinition(state)
-    }];
+    #linePatterns;
 
     /**
      * The semantic token types currently supported by this
@@ -779,6 +758,31 @@ class ParseState {
     }
 
     constructor() {
+        // Set up line pattern handlers
+        this.#linePatterns = [{
+            "type": 'comment',
+            "pattern": SyntaxPattern.Comment,
+            "action": this.#parseComment
+        },
+        {
+            "type": 'pragma',
+            "pattern": SyntaxPattern.Pragma,
+            "action": this.#parsePragma
+        },
+        {
+            "type": 'token',
+            "pattern": SyntaxPattern.TokenDefinition,
+            "action": this.#parseTokenDefinition
+        },
+        {
+            'type': 'rule',
+            "pattern": SyntaxPattern.RuleDefinition,
+            "action": this.#parseRuleDefinition
+        }];
+
+        // Set up parser preferences
+        this.#errorThreshold = 25;
+        
         this.clear();
     }
 
@@ -884,7 +888,7 @@ class ParseState {
         this.#astNodes.forEach((node) => {
             if (!node) return;
 
-            const allReferences = node.getReferencesFor(searchElement);
+            const allReferences = node.getLexicalTokensFor(searchElement);
             if (allReferences.length > 0) {
                 defs.push(...allReferences);
             }
@@ -1085,7 +1089,7 @@ class ParseState {
             end: docEnd
         };
 
-        /** @type {DocumentSymbol[]} */
+        /** @type {DocumentSymbol} */
         const tokenSymbols = {
             name: 'Tokens',
             kind: SymbolKind.Namespace,
@@ -1163,7 +1167,6 @@ class ParseState {
         if (this.#status !== ParserStatus.Ready) return sTokens;
 
         this.#astNodes.forEach(node => {
-            console.info(`Tokking ${node}:${JSON.stringify(node)}`);
             const tokArr = node?.getSemanticTokens();
             if (tokArr && tokArr.length > 0) {
                 sTokens.push(...tokArr);
@@ -1194,9 +1197,12 @@ class ParseState {
      */
     #parseLines(lines) {
         let state = new ParseState({
+            className: undefined,
+            walkersPragmaDefined: false,
+            defaultWalkerName: undefined,
             addErrorWithRange: this.#addErrorWithRange.bind(this),
             addDefinition: this.#addDefinition.bind(this),
-            lookupDefinition: this.#lookupDefinition.bind(this),
+            lookupReference: this.#lookupReference.bind(this),
             addForwardReference: this.#addForwardReference.bind(this),
             removeForwardReference: this.#removeForwardReference.bind(this)
         });
@@ -1466,7 +1472,6 @@ class ParseState {
 
     /**
      * Adds an error (diagnostic) to the current document for the given range
-     * @private
      * @type {AddErrorWithRange}
      */
     #addErrorWithRange(message, severity = ErrorSeverity.Error, range) {
@@ -1505,7 +1510,7 @@ class ParseState {
     }
 
     /**
-     * Adds a definition to the appropriate definitions collection.
+     * Adds a node to the appropriate definitions collection.
      * @param {ASTNode} def
      * @returns {void}
      */
@@ -1523,28 +1528,27 @@ class ParseState {
             }
 
             defs.push(def);
-            return def;
         }
     }
 
     /**
-     * Looks up a definition from the appropriate definitions collection.
-     * @param {ASTNode} def
-     * @returns {void}
+     * Looks up a reference from the appropriate definitions collection.
+     * @param {Reference} ref
+     * @returns {boolean}
      */
-    #lookupDefinition(def) {
-        const defMap = this.#definitionsMap.get(def.type);
+    #lookupReference(ref) {
+        const defMap = this.#definitionsMap.get(ref.type);
         if (!defMap) {
             return false;
         }
 
-        return defMap.has(def.name);
+        return defMap.has(ref.name);
     }
 
     /**
      * Searches for definitions of the given type. If found
      * returns an array of ranges where found.
-     * @param {string>} lookupType
+     * @param {string} lookupType
      * @param {string} word
      * @returns {range[]}
      */
@@ -1654,19 +1658,18 @@ class ASTNode {
     }
 
     /**
-     * The range of the node
+     * The range of the node.
      */
     get range() {
         return this.#range;
     }
 
     /**
-     * Parses the node and returns state
-     * @param {ParseState} state
-     * @returns {ParseState}
+     * Parses the node.
+     * @type {NodeParser}
      */
     parse(state) {
-        return undefined
+
     }
 
     /**
@@ -1695,13 +1698,13 @@ class ASTNode {
     }
 
     /**
-     * Finds tokens in the current node for another
-     * named node. 
+     * Finds tokens in the current node that reference
+     * another node. 
      * Reminder: Return lexical tokens.
-     * @param {Reference} definition 
-     * @returns {LexicalToken[]}
+     * @param {Reference} reference - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
      */
-    getReferencesFor(definition) {
+    getLexicalTokensFor(reference) {
         return [];
     }
 
@@ -1785,6 +1788,10 @@ class TokenNode extends ASTNode {
         state.removeForwardReference(this.name, this.type);
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|ASTNode|null}
+     */
     getReferenceOrNodeAt(character) {
         if (isCharacterInsideToken(this.#nameToken, character)) {
             return this;
@@ -2004,8 +2011,12 @@ class WalkersPragmaNode extends PragmaNode {
         state.walkersPragmaDefined = true;
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|ASTNode|null}
+     */
     getReferenceOrNodeAt(character) {
-        const walker = this.#walkers.find(w => isCharacterInsideToken(w, character));
+        const walker = this.#walkers.find(w => w.isCharacterInside(character));
         return walker ? walker : null;
     }
 
@@ -2015,19 +2026,17 @@ class WalkersPragmaNode extends PragmaNode {
     }
 
     /**
-     * 
-     * @param {Reference} noderef 
-     * @returns {ASTNode[]}
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
      */
-    getReferencesFor(noderef) {
+    getLexicalTokensFor(noderef) {
         const refs = [];
         if (noderef.type !== 'walker') return refs;
 
         const ref = this.#walkers.find(w => w.name === noderef.name);
         if (!ref) return refs;
 
-        refs.push(ref);
-        return refs;
+        return ref.getLexicalTokensFor(noderef);
     }
 
     getSemanticTokens() {
@@ -2067,6 +2076,24 @@ class WalkerNode extends ASTNode {
 
     get type() {
         return 'walker';
+    }
+
+    /**
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
+     */
+    getLexicalTokensFor(noderef) {
+        const refs = [];
+        // Since this will only be called from a parent
+        // collection, no need to check if noderef matches.
+        if (this.#walkerToken) {
+            refs.push(this.#walkerToken);
+        }
+        return refs;
+    }
+
+    isCharacterInside(character) {
+        return isCharacterInsideToken(this.#walkerToken, character);
     }
 
     toJSON() {
@@ -2122,7 +2149,7 @@ class DefaultWalkerPragmaNode extends PragmaNode {
         const endColumn = walkerNameToken.range.end.character;
 
         // Add an error if the walker has not been defined
-        if (!state.lookupDefinition(walkerReferenceNode)) {
+        if (!state.lookupReference(walkerReferenceNode)) {
             state.addError(
                 `A walker called '${walkerNameToken.lexeme}' has not been defined`,
                 ErrorSeverity.Error,
@@ -2136,6 +2163,10 @@ class DefaultWalkerPragmaNode extends PragmaNode {
         state.defaultWalker = walkerName;
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|null}
+     */
     getReferenceAt(character) {
         if (isCharacterInsideToken(this.#walkerReferenceToken, character)) {
             return { type: 'walker', name: this.#walkerReferenceToken.lexeme };
@@ -2144,16 +2175,17 @@ class DefaultWalkerPragmaNode extends PragmaNode {
         return null;
     }
 
-    getReferencesFor(noderef) {
+    /**
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
+     */
+    getLexicalTokensFor(noderef) {
         const refs = [];
         if (noderef.type !== 'walker') return refs;
 
         if (this.#walkerReferenceToken.lexeme !== noderef.name) return refs;
 
-        refs.push({
-            name: '',
-            range: this.#walkerReferenceToken.range
-        });
+        refs.push(this.#walkerReferenceToken);
 
         return refs;
     }
@@ -2229,7 +2261,7 @@ class MembersPragmaNode extends PragmaNode {
         const startColumn = walkerNameToken.range.start.character;
         const endColumn = walkerNameToken.range.end.character;
 
-        if (!state.lookupDefinition(walkerReferenceNode)) {
+        if (!state.lookupReference(walkerReferenceNode)) {
             state.addError(
                 `A walker called '${walkerName}' has not been defined`,
                 ErrorSeverity.Warning,
@@ -2258,6 +2290,10 @@ class MembersPragmaNode extends PragmaNode {
         state.expectCodeBlock = true;
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|null}
+     */
     getReferenceAt(character) {
         if (this.#walkerNameToken &&
             isCharacterInsideToken(this.#walkerNameToken, character)) {
@@ -2270,16 +2306,17 @@ class MembersPragmaNode extends PragmaNode {
         return null;
     }
 
-    getReferencesFor(noderef) {
+    /**
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
+     */
+    getLexicalTokensFor(noderef) {
         const refs = [];
         if (noderef.type !== 'walker') return refs;
 
         if (this.#walkerNameToken.lexeme !== noderef.name) return refs;
 
-        refs.push({
-            name: '',
-            range: this.#walkerNameToken.range
-        });
+        refs.push(this.#walkerNameToken);
 
         return refs;
     }
@@ -2352,7 +2389,7 @@ class AssociativityPragmaNode extends PragmaNode {
             };
 
             // The token should not be defined at this point
-            if (state.lookupDefinition(tokDef)) {
+            if (state.lookupReference(tokDef)) {
                 state.addError(
                     `The %${this.name} should appear before the definition of the token ${tokenName}`,
                     ErrorSeverity.Warning,
@@ -2372,6 +2409,10 @@ class AssociativityPragmaNode extends PragmaNode {
         }
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|null}
+     */
     getReferenceAt(character) {
         const defObj = this.#tokenNameTokens?.find((ltoken) => {
             return isCharacterInsideToken(ltoken, character);
@@ -2382,7 +2423,11 @@ class AssociativityPragmaNode extends PragmaNode {
             : null;
     }
 
-    getReferencesFor(noderef) {
+    /**
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
+     */
+    getLexicalTokensFor(noderef) {
         const refs = [];
         if (noderef.type !== 'token') return refs;
 
@@ -2451,7 +2496,7 @@ class FunctionPragmaNode extends PragmaNode {
 
         // Look up classname
         if (funcdef.walkerNameToken) {
-            if (!state.lookupDefinition({ type: 'walker', name: funcdef.walkerName })) {
+            if (!state.lookupReference({ type: 'walker', name: funcdef.walkerName })) {
                 const startColumn = funcdef.walkerNameToken.range.start.character;
                 const endColumn = funcdef.walkerNameToken.range.end.character;
                 state.addError(
@@ -2468,7 +2513,7 @@ class FunctionPragmaNode extends PragmaNode {
         const funcNameStartColumn = funcdef.functionNameToken.range.start.character; // pragma.params.range.start.character + paramsMatch.indices[3][0];
         const funcNameEndColumn = funcdef.functionNameToken.range.end.character; //funcNameStartColumn + funcdef.functionName.length;
 
-        if (state.lookupDefinition(funcdef)) {
+        if (state.lookupReference(funcdef)) {
             state.addError(
                 `A function called ${funcdef.functionName} has already been defined for the walker ${funcdef.walkerName} and the rule ${funcdef.ruleName}`,
                 ErrorSeverity.Error,
@@ -2503,20 +2548,32 @@ class FunctionPragmaNode extends PragmaNode {
         );
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|null}
+     */
     getReferenceAt(character) {
         if (character > this.paramsToken.range.start.character) {
             return this.#functionDefinition?.getReferenceAt(character);
         }
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|ASTNode|null}
+     */
     getReferenceOrNodeAt(character) {
         if (character > this.paramsToken.range.start.character) {
             return this.#functionDefinition?.getReferenceOrNodeAt(character);
         }
     }
 
-    getReferencesFor(noderef) {
-        return this.#functionDefinition.getReferencesFor(noderef);
+    /**
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
+     */
+    getLexicalTokensFor(noderef) {
+        return this.#functionDefinition.getLexicalTokensFor(noderef);
     }
 
     getFormattedLines() {
@@ -2553,7 +2610,7 @@ class FunctionDefinitionNode extends ASTNode {
     #defaulWalkerName;
 
     /**
-    * @param {RegExpExecArray} match - A scanner match
+    * @param {RegExpMatchArray} match - A scanner match
     * @param {Number} fdLine - The line where the fd match exists
     * @param {Number} fdOffset - The character offset where the fd match exists
     * @param {string} defaultWalker - The global default walker name
@@ -2615,6 +2672,10 @@ class FunctionDefinitionNode extends ASTNode {
         return this.functionNameToken.lexeme;
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|null}
+     */
     getReferenceAt(character) {
         if (isCharacterInsideToken(this.#ruleNameToken, character)) {
             return { type: 'rule', name: this.#ruleNameToken.lexeme };
@@ -2627,6 +2688,10 @@ class FunctionDefinitionNode extends ASTNode {
         return null;
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|ASTNode|null}
+     */
     getReferenceOrNodeAt(character) {
         if (isCharacterInsideToken(this.#functionNameToken, character)) {
             return { type: 'function', name: this.name };
@@ -2635,7 +2700,11 @@ class FunctionDefinitionNode extends ASTNode {
         return this.getReferenceAt(character);
     }
 
-    getReferencesFor(noderef) {
+    /**
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
+     */
+    getLexicalTokensFor(noderef) {
         const refs = [];
         if (!(['rule', 'walker', 'function'].includes(noderef.type))) return refs;
 
@@ -2786,7 +2855,7 @@ class RuleNode extends MultilineASTNode {
 
                 // Look up the token name. If not found, add a forward
                 // reference.
-                if (!state.lookupDefinition({ type: 'token', name: elementName })) {
+                if (!state.lookupReference({ type: 'token', name: elementName })) {
                     state.addForwardReference(
                         elementName,
                         'token',
@@ -2820,7 +2889,7 @@ class RuleNode extends MultilineASTNode {
 
                 // Look up the rule name. If not found, add a forward
                 // reference.
-                if (!state.lookupDefinition({ type: 'rule', name: elementName })) {
+                if (!state.lookupReference({ type: 'rule', name: elementName })) {
                     state.addForwardReference(
                         elementName,
                         'rule',
@@ -2859,6 +2928,10 @@ class RuleNode extends MultilineASTNode {
         return this;
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|null}
+     */
     getReferenceAt(character) {
         const rdef = this.#ruleDefElements?.find(
             rdelement => isCharacterInsideToken(rdelement.element, character)
@@ -2877,6 +2950,10 @@ class RuleNode extends MultilineASTNode {
         return null;
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|ASTNode|null}
+     */
     getReferenceOrNodeAt(character) {
         if (isCharacterInsideToken(this.#nameToken, character)) {
             return this;
@@ -2885,7 +2962,11 @@ class RuleNode extends MultilineASTNode {
         return this.getReferenceAt(character);
     }
 
-    getReferencesFor(noderef) {
+    /**
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
+     */
+    getLexicalTokensFor(noderef) {
         const resulRefs = [];
         if (!(['rule', 'token'].includes(noderef.type))) return resulRefs;
 
@@ -3049,10 +3130,6 @@ class CodeBlockNode extends MultilineASTNode {
         return this.#name;
     }
 
-    parse(state) {
-        return state;
-    }
-
     /**
      * To be called when the end of the block has been encountered.
      * This RESETS the current code block, so cache it if required.
@@ -3152,7 +3229,7 @@ class CodeBlockNameNode extends ASTNode {
     /** @type {NodeParser} */
     parse(state) {
         // Validate the classname
-        if (!state.lookupDefinition({ type: 'walker', name: this.className })) {
+        if (!state.lookupReference({ type: 'walker', name: this.className })) {
             const startColumn = this.#classnameToken.range.start.character;
             const endColumn = this.#classnameToken.range.end.character;
             state.addError(
@@ -3165,7 +3242,7 @@ class CodeBlockNameNode extends ASTNode {
 
         if (this.functionName != 'go') {
             const funcFullName = this.name;
-            if (!state.lookupDefinition({ type: 'function', name: funcFullName })) {
+            if (!state.lookupReference({ type: 'function', name: funcFullName })) {
                 const startColumn = this.#functionNameToken.range.start.character;
                 const endColumn = this.#functionNameToken.range.end.character;
 
@@ -3186,6 +3263,10 @@ class CodeBlockNameNode extends ASTNode {
         state.expectCodeBlock = true;
     }
 
+    /**
+     * @param {Number} character
+     * @returns {Reference|null}
+     */
     getReferenceAt(character) {
         if (isCharacterInsideToken(this.#classnameToken, character)) {
             return { type: 'walker', name: this.#classnameToken.lexeme };
@@ -3198,7 +3279,11 @@ class CodeBlockNameNode extends ASTNode {
         return null;
     }
 
-    getReferencesFor(noderef) {
+    /**
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
+     */
+    getLexicalTokensFor(noderef) {
         const refs = [];
         if (!(['walker', 'function'].includes(noderef.type))) return refs;
 
