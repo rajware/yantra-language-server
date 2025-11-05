@@ -39,6 +39,7 @@
 /**
  * The ruledefelement nonterminal
  * @typedef {Object} RuleDefElement
+ * @property {LexicalToken} anchor
  * @property {LexicalToken} element
  * @property {LexicalToken|null} alias
  */
@@ -211,7 +212,7 @@ const ElementPattern = {
 const RepeatedElementPattern = {
     CppNames: /\s*?(?:([a-zA-Z]\w*)\s*?)+/dg,
     TokenNames: /\s*?(?:([A-Z][A-Z_]*)\s*?)+/dg,
-    RuleDefs: /\s*?(?:([a-zA-Z]\w*)\s*(?:\(([a-zA-Z]\w*)\))?\s*)+?/dg
+    RuleDefs: /\s*?(?:(\^)?([a-zA-Z]\w*)\s*(?:\(([a-zA-Z]\w*)\))?\s*)+?/dg
 }
 
 /**
@@ -782,7 +783,7 @@ class ParseState {
 
         // Set up parser preferences
         this.#errorThreshold = 25;
-        
+
         this.clear();
     }
 
@@ -2814,22 +2815,30 @@ class RuleNode extends MultilineASTNode {
 
         // Process rule definitions
         const definitionsOffset = this.#definitionToken.range.start.character;
+        let anchorAppeared = false;
 
         for (let i = 0; i < paramsMatches.length; i++) {
             // Each match has the elements:
-            // - [1] element, which could be a token or a rule
-            // - [2] alias, a matching name, optional
+            // - [1] - a caret (^), which marks this ruledef as an "anchor"
+            // - [2] - element, which could be a token or a rule
+            // - [3] alias, a matching name, optional
             /** @type {RuleDefElement} */
             const ruleDefElement = {
-                element: lexicalTokenFromMatch(
+                anchor: lexicalTokenFromMatch(
                     paramsMatches[i],
                     1,
                     state.line,
                     definitionsOffset
                 ),
-                alias: lexicalTokenFromMatch(
+                element: lexicalTokenFromMatch(
                     paramsMatches[i],
                     2,
+                    state.line,
+                    definitionsOffset
+                ),
+                alias: lexicalTokenFromMatch(
+                    paramsMatches[i],
+                    3,
                     state.line,
                     definitionsOffset)
             }
@@ -2837,6 +2846,19 @@ class RuleNode extends MultilineASTNode {
             // Store it internally
             this.#ruleDefElements.push(ruleDefElement);
 
+            // Check if anchors are repeated
+            if(ruleDefElement.anchor) {
+                if(anchorAppeared) {
+                    state.addError(
+                        'There cannot be more than one anchor in a rule definition',
+                        ErrorSeverity.Error,
+                        ruleDefElement.anchor.range.start.character,
+                        ruleDefElement.anchor.range.end.character
+                    );
+                } else {
+                    anchorAppeared = true;
+                }
+            }
             const elementName = ruleDefElement.element.lexeme;
 
             // An element could be a Token
@@ -2918,6 +2940,10 @@ class RuleNode extends MultilineASTNode {
         state.removeForwardReference(this.name, 'rule');
     }
 
+    /**
+     * @param {ParseState} state 
+     * @returns {ASTNode}
+     */
     end(state) {
         // Rule ended as this line began
         this.#multilineEnd = {
@@ -3000,7 +3026,7 @@ class RuleNode extends MultilineASTNode {
         ruleElements.push(':=');
 
         this.#ruleDefElements.forEach(item => {
-            ruleElements.push(item.element.lexeme);
+            ruleElements.push(`${item.anchor ? '^' : ''}${item.element.lexeme}`);
             if (item.alias) {
                 ruleElements.push(`(${item.alias.lexeme})`);
             }
@@ -3040,6 +3066,13 @@ class RuleNode extends MultilineASTNode {
         });
 
         this.#ruleDefElements.forEach(rdef => {
+            if(rdef.anchor) {
+                semToks.push({
+                    range: rdef.anchor.range,
+                    tokenType: SemanticTokenType.Operator,
+                    tokenModifiers: []
+                });
+            }
             semToks.push({
                 range: rdef.element.range,
                 tokenType: isYantraRuleName(rdef.element.lexeme)
