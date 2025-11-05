@@ -185,7 +185,7 @@
  */
 const SyntaxPattern = {
     Comment: /^\s*?\/\/.*?$/,
-    Pragma: /^\s*?%([a-z_]+)(?:\s+(.*?))?(;?)$/d,
+    Pragma: /^\s*?%([a-z_]+)(?:\s+(.*?))?(;)?$/d,
     TokenDefinition: /^\s*?([A-Z][A-Z0-9_]*?)\s*?(:=)\s*?(".*?")(!)?\s*?(;)?\s*?$/d,
     RuleDefinition: /^\s*?([a-z]\w*?)\s*?(?:\(([a-z]\w*?)\)\s*?)?(:=)\s*?(.*?)(;)?\s*?$/d,
     CodeBlockName: /^@(\w+)(?:::(\w+))?\s*?$/d
@@ -496,12 +496,12 @@ class ParseState {
     /**
      * If the scanner is currently in a code block.
      */
-    inCodeBlock = false;
+    #inCodeBlock = false;
     /**
      * The current code block
      * @type {CodeBlockNode}
      */
-    currentCodeBlock;
+    #currentCodeBlock;
     /**
      * Code block name
      * @type {CodeBlockName}
@@ -587,6 +587,24 @@ class ParseState {
     */
     get ruleDefName() {
         return this.#currentRule?.name ?? '';
+    }
+
+    /**
+     * True if parsing is currently inside a code block,
+     * false otherwise.
+     * @type {boolean}
+     * @readonly
+     */
+    get inCodeBlock() {
+        return this.#inCodeBlock;
+    }
+
+    /**
+     * @type {CodeBlockNode}
+     * @readonly
+     */
+    get currentCodeBlock() {
+        return this.#currentCodeBlock;
     }
 
     /**
@@ -696,6 +714,31 @@ class ParseState {
 
     resetCodeBlockName() {
         this.codeBlockName = undefined;
+    }
+
+    /**
+     * 
+     * @param {Number} [startCharacter] - The character position in current line where the code block starts. Default 0. 
+     * @returns {CodeBlockNode}
+     */
+    startCodeBlock(startCharacter) {
+        const codeBlock = new CodeBlockNode(this, startCharacter)
+        this.#currentCodeBlock = codeBlock;
+
+        this.#inCodeBlock = true
+        this.expectCodeBlock = false;
+
+        return codeBlock;
+    }
+
+    resetCodeBlock() {
+        if (!this.#inCodeBlock) {
+            throw "Very unexpected end of code block";
+        }
+
+        this.#currentCodeBlock = undefined;
+        this.#inCodeBlock = false;
+        this.resetCodeBlockName();
     }
 
     /**
@@ -872,8 +915,11 @@ class ParseState {
     getReferencesForElementAt(line, character) {
         const defs = [];
 
+        // Don't do it if not parsed
         if (this.#status !== ParserStatus.Ready) return defs;
+        // Don't do it if any errors
 
+        // Don't do it if out of bounds
         if (line < 0 || line > this.#astNodes.length) return defs;
 
         const node = this.#astNodes[line];
@@ -886,7 +932,9 @@ class ParseState {
             return defs;
         }
 
-        this.#astNodes.forEach((node) => {
+        console.info('Entering node iteration');
+        this.#astNodes.forEach((node, i) => {
+            console.info(`Node ${i} - ${node}:${JSON.stringify(node)}`);
             if (!node) return;
 
             const allReferences = node.getLexicalTokensFor(searchElement);
@@ -894,6 +942,7 @@ class ParseState {
                 defs.push(...allReferences);
             }
         });
+        console.info('Exiting node iteration');
 
         const defRanges = defs.map(def => def.range);
 
@@ -1324,13 +1373,14 @@ class ParseState {
             return undefined;
         }
 
-        const codeBlock = new CodeBlockNode(state)
-        state.currentCodeBlock = codeBlock;
+        return state.startCodeBlock();
+        // const codeBlock = new CodeBlockNode(state)
+        // state.currentCodeBlock = codeBlock;
 
-        state.inCodeBlock = true
-        state.expectCodeBlock = false;
+        // state.inCodeBlock = true
+        // state.expectCodeBlock = false;
 
-        return codeBlock;
+        // return codeBlock;
     }
 
     /**
@@ -1344,7 +1394,6 @@ class ParseState {
         }
 
         const currentCodeBlock = state.currentCodeBlock;
-        // state.currentCodeBlock.parse(state);
         return currentCodeBlock.end(state);
     }
 
@@ -2036,7 +2085,7 @@ class WalkersPragmaNode extends PragmaNode {
 
         const ref = this.#walkers.find(w => w.name === noderef.name);
         if (!ref) return refs;
-
+        //console.info(`REF: ${ref}:${JSON.stringify(ref)}`);
         return ref.getLexicalTokensFor(noderef);
     }
 
@@ -2220,17 +2269,25 @@ class DefaultWalkerPragmaNode extends PragmaNode {
 class MembersPragmaNode extends PragmaNode {
     /** @type {LexicalToken} */
     #walkerNameToken;
+    /** @type {LexicalToken} */
+    #codeBlockToken;
 
+    /**
+     * @param {ParseState} state 
+     */
     constructor(state) {
         super(state)
+
+        this.#walkerNameToken = undefined;
+        this.#codeBlockToken = undefined;
     }
 
     /** @type {NodeParser} */
     parse(state) {
         const paramsToken = this.paramsToken;
-
+        const membersParamRegEx = /^\s*?([a-zA-Z_]\w*?)\s*?(%\{)?\s*$/d;
         const paramMatch = paramsToken
-            ? paramsToken.lexeme.match(ElementPattern.SpacedCppName)
+            ? paramsToken.lexeme.match(membersParamRegEx)
             : undefined;
 
         if (!paramMatch) {
@@ -2286,9 +2343,26 @@ class MembersPragmaNode extends PragmaNode {
         // A members pragma must be followed by an anonymous code 
         // block, so we will supply a name ourselves.
         state.setCodeBlockName(walkerName, 'Members');
+
         // A members pragma must be followed by an anonymous code 
         // block
-        state.expectCodeBlock = true;
+
+        // If a block begin is right there
+        const codeBlockToken = lexicalTokenFromMatch(
+            paramMatch,
+            2,
+            state.line,
+            this.paramsToken.range.start.character
+        );
+
+        if (codeBlockToken) {
+            this.#codeBlockToken = codeBlockToken;
+            // Begin a code block right here
+            state.startCodeBlock(codeBlockToken.range.start.character);
+        } else {
+            // Expect a code block on the next line
+            state.expectCodeBlock = true;
+        }
     }
 
     /**
@@ -2323,6 +2397,9 @@ class MembersPragmaNode extends PragmaNode {
     }
 
     getFormattedLines() {
+        // Just write out the pragma name and the walker name.
+        // Code block pretty printing will take care of the
+        // rest.
         return [`%members ${this.#walkerNameToken.lexeme.trim()}`];
     }
 
@@ -2574,7 +2651,12 @@ class FunctionPragmaNode extends PragmaNode {
      * @returns {LexicalToken[]} - The lexical token(s) which match the reference
      */
     getLexicalTokensFor(noderef) {
-        return this.#functionDefinition.getLexicalTokensFor(noderef);
+        // Forgiving
+        if (this.#functionDefinition) {
+            return this.#functionDefinition.getLexicalTokensFor(noderef);
+        }
+
+        return [];
     }
 
     getFormattedLines() {
@@ -2847,8 +2929,8 @@ class RuleNode extends MultilineASTNode {
             this.#ruleDefElements.push(ruleDefElement);
 
             // Check if anchors are repeated
-            if(ruleDefElement.anchor) {
-                if(anchorAppeared) {
+            if (ruleDefElement.anchor) {
+                if (anchorAppeared) {
                     state.addError(
                         'There cannot be more than one anchor in a rule definition',
                         ErrorSeverity.Error,
@@ -3066,7 +3148,7 @@ class RuleNode extends MultilineASTNode {
         });
 
         this.#ruleDefElements.forEach(rdef => {
-            if(rdef.anchor) {
+            if (rdef.anchor) {
                 semToks.push({
                     range: rdef.anchor.range,
                     tokenType: SemanticTokenType.Operator,
@@ -3134,16 +3216,16 @@ class CodeBlockNode extends MultilineASTNode {
     #lines;
 
     /**
-     * 
      * @param {ParseState} state 
+     * @param {Number} [startCharacter] - the start character of the code block, if not the line start
      */
-    constructor(state) {
+    constructor(state, startCharacter) {
         const isAnonymous = state.inRuleDef && !state.expectNamedCodeBlock;
         const startLine = isAnonymous ? state.line : state.line - 1;
 
         super('codeblock', {
             start: {
-                line: startLine, character: 0
+                line: startLine, character: startCharacter ?? 0
             },
             end: undefined
         });
@@ -3183,9 +3265,10 @@ class CodeBlockNode extends MultilineASTNode {
         state.removeForwardReference(this.name, this.type);
 
         // Reset current code block and name
-        state.currentCodeBlock = undefined;
-        state.inCodeBlock = false;
-        state.resetCodeBlockName();
+        state.resetCodeBlock();
+        // state.currentCodeBlock = undefined;
+        // state.inCodeBlock = false;
+        // state.resetCodeBlockName();
 
         // If a code block ends while in a rule definition
         // then we expect a name next.
