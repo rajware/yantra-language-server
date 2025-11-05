@@ -1163,6 +1163,7 @@ class ParseState {
         if (this.#status !== ParserStatus.Ready) return sTokens;
 
         this.#astNodes.forEach(node => {
+            console.info(`Tokking ${node}:${JSON.stringify(node)}`);
             const tokArr = node?.getSemanticTokens();
             if (tokArr && tokArr.length > 0) {
                 sTokens.push(...tokArr);
@@ -1384,7 +1385,22 @@ class ParseState {
             case 'function':
                 pragmaNode = new FunctionPragmaNode(state);
                 break;
-            default:
+            case 'namespace':
+            case 'pch_header':
+            case 'std_header':
+            case 'hdr_header':
+            case 'src_header':
+            case 'class_member':
+            case 'encoding':
+            case 'check_unused_tokens':
+            case 'auto_resolve':
+            case 'warn_resolve':
+            case 'walker_output':
+            case 'walker_traversal':
+            case 'start':
+            case 'fallback':
+            case 'lexer_mode':
+                pragmaNode = new StubPragmaNode(state);
         }
 
         if (!pragmaNode) {
@@ -1876,6 +1892,17 @@ class PragmaNode extends ASTNode {
     }
 }
 
+/**
+ * A stand-in for all valid pragmas, which have not
+ * been properly wired up in the JavaScript parser.s
+ */
+class StubPragmaNode extends PragmaNode {
+
+    constructor(state) {
+        super(state);
+    }
+}
+
 class ClassNamePragmaNode extends PragmaNode {
 
     constructor(state) {
@@ -2143,11 +2170,15 @@ class DefaultWalkerPragmaNode extends PragmaNode {
         const pragmaToks = super.getSemanticTokens();
         semToks.push(...pragmaToks);
 
-        semToks.push({
-            range: this.#walkerReferenceToken.range,
-            tokenType: SemanticTokenType.Class,
-            tokenModifiers: []
-        });
+        // As far as possible, ignore errors while returning
+        // semantic tokens.
+        if (this.#walkerReferenceToken) {
+            semToks.push({
+                range: this.#walkerReferenceToken.range,
+                tokenType: SemanticTokenType.Class,
+                tokenModifiers: []
+            });
+        }
 
         return semToks;
     }
@@ -2264,11 +2295,15 @@ class MembersPragmaNode extends PragmaNode {
         const pragmaToks = super.getSemanticTokens();
         semToks.push(...pragmaToks);
 
-        semToks.push({
-            range: this.#walkerNameToken.range,
-            tokenType: SemanticTokenType.Class,
-            tokenModifiers: []
-        });
+        // As far as possible, ignore errors while returning
+        // semantic tokens.
+        if (this.#walkerNameToken) {
+            semToks.push({
+                range: this.#walkerNameToken.range,
+                tokenType: SemanticTokenType.Class,
+                tokenModifiers: []
+            });
+        }
 
         return semToks;
     }
@@ -2496,8 +2531,12 @@ class FunctionPragmaNode extends PragmaNode {
         const pragmaToks = super.getSemanticTokens();
         semToks.push(...pragmaToks);
 
-        const funcDefToks = this.#functionDefinition.getSemanticTokens();
-        semToks.push(...funcDefToks);
+        // As far as possible, ignore errors while returning
+        // semantic tokens.
+        if (this.#functionDefinition) {
+            const funcDefToks = this.#functionDefinition.getSemanticTokens();
+            semToks.push(...funcDefToks);
+        }
 
         return semToks;
     }
