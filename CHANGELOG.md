@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.2.1] - 2025-11-06
+## [0.2.2] - 2025-11-06
+
+### Fixed
+- Critical Format Document bug, introduced due to adding Lexer modes
+
+## [0.2.1] - 2025-11-06 [YANKED]
 
 ### Added
 - Rule Anchors
