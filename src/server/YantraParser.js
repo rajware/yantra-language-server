@@ -186,7 +186,7 @@
 const SyntaxPattern = {
     Comment: /^\s*?\/\/.*?$/,
     Pragma: /^\s*?%([a-z_]+)(?:\s+(.*?))?(;)?$/d,
-    TokenDefinition: /^\s*?([A-Z][A-Z0-9_]*?)\s*?(:=)\s*?(".*?")(!)?\s*?(;)?\s*?$/d,
+    TokenDefinition: /^\s*?([A-Z][A-Z0-9_]*?)\s*?(:=)\s*?(".*?")(!)?\s*?(?:\[([A-Za-z][A-Za-z0-9_]*?|\^)\])?\s*?(;)?\s*?$/d,
     RuleDefinition: /^\s*?([a-z]\w*?)\s*?(?:\(([a-z]\w*?)\)\s*?)?(:=)\s*?(.*?)(;)?\s*?$/d,
     CodeBlockName: /^@(\w+)(?:::(\w+))?\s*?$/d
 }
@@ -201,7 +201,8 @@ const ElementPattern = {
     RuleName: /^[a-z]\w*?$/d,
     CppName: /^[a-zA-Z_]\w*$/d,
     SpacedCppName: /^\s*?([a-zA-Z_]\w*?)\s*$/d,
-    FunctionDefinition: /^\s*?([a-z_]\w+)\s+(?:(?:([a-zA-Z_]\w+)::)?([a-zA-Z_]\w+))\s*?\((.*?)\)\s*?->\s*(?:((?:[a-zA-Z_]\w+::)?[a-zA-Z_]\w+))\s*?(;)?\s*$/d
+    FunctionDefinition: /^\s*?([a-z_]\w+)\s+(?:(?:([a-zA-Z_]\w+)::)?([a-zA-Z_]\w+))\s*?\((.*?)\)\s*?->\s*(?:((?:[a-zA-Z_]\w+::)?[a-zA-Z_]\w+))\s*?(;)?\s*$/d,
+    LexerMode: /^\s*?([A-Za-z][A-Za-z0-9_]*?)\s*$/d
 }
 
 /**
@@ -868,7 +869,8 @@ class ParseState {
             ['rule', new Map()],
             ['walker', new Map()],
             ['function', new Map()],
-            ['codeblock', new Map()]
+            ['codeblock', new Map()],
+            ['lexermode', new Map()]
         ]);
 
         this.#forwardReferences = [];
@@ -1176,11 +1178,21 @@ class ParseState {
         };
         this.#addSymbols(functionSymbols.children, 'function', SymbolKind.Method);
 
+        const lexerModeSymbols = {
+            name: 'Lexer Modes',
+            kind: SymbolKind.Namespace,
+            range: documentRange,
+            selectionRange: emptyRange,
+            children: []
+        };
+        this.#addSymbols(lexerModeSymbols.children, 'lexermode', SymbolKind.Constant);
+
         const documentOutline = [
             tokenSymbols,
             ruleSymbols,
             walkerSymbols,
-            functionSymbols
+            functionSymbols,
+            lexerModeSymbols
         ];
 
         return documentOutline;
@@ -1441,6 +1453,9 @@ class ParseState {
             case 'function':
                 pragmaNode = new FunctionPragmaNode(state);
                 break;
+            case 'lexer_mode':
+                pragmaNode = new LexerModePragmaNode(state);
+                break;
             case 'namespace':
             case 'pch_header':
             case 'std_header':
@@ -1455,7 +1470,6 @@ class ParseState {
             case 'walker_traversal':
             case 'start':
             case 'fallback':
-            case 'lexer_mode':
                 pragmaNode = new StubPragmaNode(state);
         }
 
@@ -1799,6 +1813,7 @@ class TokenNode extends ASTNode {
     #assignmentOperatorToken; //: lexicalTokenFromLine(state, 2),
     #valueToken; //: lexicalTokenFromLine(state, 3),
     #negatorToken; //: lexicalTokenFromLine(state, 4),
+    #lexerModeToken;
     #terminatorToken; //: lexicalTokenFromLine(state, 5)
 
     /**
@@ -1812,12 +1827,14 @@ class TokenNode extends ASTNode {
         // - [2] assignment operator
         // - [3] token value
         // - [4] "!' if present
-        // - [5] semicolon if present
+        // - [5] lexermode if present
+        // - [6] semicolon if present
         this.#nameToken = lexicalTokenFromLine(state, 1);
         this.#assignmentOperatorToken = lexicalTokenFromLine(state, 2);
         this.#valueToken = lexicalTokenFromLine(state, 3);
         this.#negatorToken = lexicalTokenFromLine(state, 4);
-        this.#terminatorToken = lexicalTokenFromLine(state, 5);
+        this.#lexerModeToken = lexicalTokenFromLine(state, 5);
+        this.#terminatorToken = lexicalTokenFromLine(state, 6);
     }
 
     get name() {
@@ -1836,6 +1853,34 @@ class TokenNode extends ASTNode {
 
         // Remove any forward references for this token
         state.removeForwardReference(this.name, this.type);
+
+        // Add forward reference for lexer mode token, if any
+        if (this.#lexerModeToken && this.#lexerModeToken.lexeme !== '^') {
+            state.addForwardReference(
+                this.#lexerModeToken.lexeme,
+                'lexermode',
+                this.#lexerModeToken.range
+            );
+        }
+    }
+
+    /**
+     * @param {Number} character
+     * @returns {Reference|null}
+     */
+    getReferenceAt(character) {
+        if (
+            this.#lexerModeToken &&
+            this.#lexerModeToken.lexeme !== '^' &&
+            isCharacterInsideToken(this.#lexerModeToken, character)
+        ) {
+            return {
+                name: this.#lexerModeToken.lexeme,
+                type: 'lexermode'
+            };
+        }
+
+        return null;
     }
 
     /**
@@ -1850,8 +1895,23 @@ class TokenNode extends ASTNode {
         return this.getReferenceAt(character);
     }
 
+    /**
+     * @param {Reference} noderef - The reference to be queried in the current Node
+     * @returns {LexicalToken[]} - The lexical token(s) which match the reference
+     */
+    getLexicalTokensFor(noderef) {
+        const toks = [];
+        if(
+            noderef.type === 'lexermode' &&
+            noderef.name === this.#lexerModeToken?.lexeme
+        ) {
+            toks.push(this.#lexerModeToken);
+        }
+        return toks;
+    }
+
     getFormattedLines() {
-        return [`${this.name} := ${this.#valueToken.lexeme}${this.#negatorToken?.lexeme ?? ''};`]
+        return [`${this.name} := ${this.#valueToken.lexeme}${this.#negatorToken?.lexeme ?? ''}${this.#lexerModeToken ? ' [' + this.#lexerModeToken.lexeme + ']' : ''};`]
     }
 
     /** @returns {SemanticToken[]} */
@@ -1879,6 +1939,14 @@ class TokenNode extends ASTNode {
             semToks.push({
                 range: this.#negatorToken.range,
                 tokenType: SemanticTokenType.Operator,
+                tokenModifiers: []
+            });
+        }
+
+        if (this.#lexerModeToken) {
+            semToks.push({
+                range: this.#lexerModeToken.range,
+                tokenType: SemanticTokenType.Parameter,
                 tokenModifiers: []
             });
         }
@@ -2829,6 +2897,111 @@ class FunctionDefinitionNode extends ASTNode {
         }
 
         return semToks;
+    }
+}
+
+class LexerModePragmaNode extends PragmaNode {
+    #modeNameToken;
+
+    /**
+     * @param {ParseState} state 
+     */
+    constructor(state) {
+        super(state);
+    }
+
+
+    get name() {
+        return this.#modeNameToken?.lexeme ?? '';
+    }
+
+    get type() {
+        return 'lexermode';
+    }
+    /**
+     * @param {ParseState} state 
+     * @returns {void}
+     */
+    parse(state) {
+        if (!this.paramsToken) {
+            state.addError(
+                'The %lexer_mode pragma requires a valid lexer mode name'
+            );
+            return;
+        }
+
+        const paramsMatch = this.paramsToken.lexeme.match(ElementPattern.LexerMode);
+        if (!paramsMatch) {
+            state.addError(
+                'The %lexer_mode pragma requires a valid lexer mode name'
+            );
+            return;
+        }
+
+        if (!this.terminatorToken) {
+            state.addError('A token definition should end with a semicolon');
+            return;
+        }
+
+        this.#modeNameToken = lexicalTokenFromMatch(
+            paramsMatch,
+            1,
+            state.line,
+            this.paramsToken.range.start.character
+        );
+
+        // Push definition
+        state.addDefinition(this);
+
+        // Remove any forward references for this token
+        state.removeForwardReference(this.name, this.type);
+    }
+
+    /**
+     * 
+     * @param {Number} character 
+     * @returns {Reference|null}
+     */
+    getReferenceAt(character) {
+        if (isCharacterInsideToken(this.#modeNameToken, character)) {
+            return { name: this.name, type: this.type };
+        }
+
+        return null;
+    }
+
+    /**
+     * @param {Reference} reference
+     * @returns {LexicalToken[]}
+     */
+    getLexicalTokensFor(reference) {
+        const toks = [];
+        if (reference.type === this.type && reference.name === this.name) {
+            toks.push(this.#modeNameToken);
+        }
+        return toks;
+    }
+
+    /**
+     * @returns {string[]}
+     */
+    getFormattedLines() {
+        return [`%lexer_mode ${this.name};`];
+    }
+
+    /**
+     * @returns {SemanticToken[]}
+     */
+    getSemanticTokens() {
+        const superToks = super.getSemanticTokens();
+        if (this.#modeNameToken) {
+            superToks.push({
+                range: this.#modeNameToken.range,
+                tokenType: SemanticTokenType.Variable,
+                tokenModifiers: [SemanticTokenModifier.Definition, SemanticTokenModifier.ReadOnly]
+            });
+        }
+        return superToks;
     }
 }
 
