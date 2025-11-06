@@ -1072,8 +1072,9 @@ class ParseState {
                     const lhs = match[1].padEnd(maxLhsLength, ' ');
                     const rhs = match[3];
                     const bang = match[4] || '';
-                    const semicolon = match[5];
-                    result.push(`${lhs} := ${rhs}${bang}${semicolon}`);
+                    const lexermode = match[5] ? ` [${match[5]}]` : '';
+                    const semicolon = match[6];
+                    result.push(`${lhs} := ${rhs}${bang}${lexermode}${semicolon}`);
                 } else {
                     result.push(line); // fallback, shouldn't happen
                 }
