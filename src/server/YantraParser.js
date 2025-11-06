@@ -1901,12 +1901,21 @@ class TokenNode extends ASTNode {
      */
     getLexicalTokensFor(noderef) {
         const toks = [];
+
+        if(
+            noderef.type === 'token' &&
+            noderef.name === this.name
+        ) {
+            toks.push(this.#nameToken);
+        }
+
         if(
             noderef.type === 'lexermode' &&
             noderef.name === this.#lexerModeToken?.lexeme
         ) {
             toks.push(this.#lexerModeToken);
         }
+
         return toks;
     }
 
