@@ -2,7 +2,7 @@
   "name": "yantra-language-server",
   "displayName": "Yantra Language Server",
   "description": "Language Server Protocol (LSP) implementation for the Yantra grammar language",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "rajware",
   "license": "MIT",
   "icon": "icon.png",
@@ -32,6 +32,7 @@
     "syntaxes/yantra.tmLanguage.json",
     "language-configuration.json",
     "LICENSE",
+    "CHANGELOG.md",
     "icon.png"
   ],
   "main": "./dist/extension.js",

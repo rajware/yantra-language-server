@@ -934,9 +934,7 @@ class ParseState {
             return defs;
         }
 
-        console.info('Entering node iteration');
         this.#astNodes.forEach((node, i) => {
-            console.info(`Node ${i} - ${node}:${JSON.stringify(node)}`);
             if (!node) return;
 
             const allReferences = node.getLexicalTokensFor(searchElement);
@@ -944,7 +942,6 @@ class ParseState {
                 defs.push(...allReferences);
             }
         });
-        console.info('Exiting node iteration');
 
         const defRanges = defs.map(def => def.range);
 
@@ -2162,7 +2159,7 @@ class WalkersPragmaNode extends PragmaNode {
 
         const ref = this.#walkers.find(w => w.name === noderef.name);
         if (!ref) return refs;
-        //console.info(`REF: ${ref}:${JSON.stringify(ref)}`);
+
         return ref.getLexicalTokensFor(noderef);
     }
 
