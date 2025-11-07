@@ -201,7 +201,7 @@ const ElementPattern = {
     RuleName: /^[a-z]\w*?$/d,
     CppName: /^[a-zA-Z_]\w*$/d,
     SpacedCppName: /^\s*?([a-zA-Z_]\w*?)\s*$/d,
-    FunctionDefinition: /^\s*?([a-z_]\w+)\s+(?:(?:([a-zA-Z_]\w+)::)?([a-zA-Z_]\w+))\s*?\((.*?)\)\s*?->\s*(?:((?:[a-zA-Z_]\w+::)?[a-zA-Z_]\w+))\s*?(;)?\s*$/d,
+    FunctionDefinition: /^\s*?([a-z_]\w+)\s+(?:(?:([a-zA-Z_]\w+)::)?([a-zA-Z_]\w+))\s*?\((.*?)\)\s*?->\s*([^\s\(\);]+)\s*?(;)?\s*$/d,
     LexerMode: /^\s*?([A-Za-z][A-Za-z0-9_]*?)\s*$/d
 }
 
@@ -2882,7 +2882,7 @@ class FunctionDefinitionNode extends ASTNode {
     }
 
     getFormattedLines() {
-        return [`${this.ruleName} ${this.walkerName}::${this.functionName} (${this.#allParamsToken?.lexeme ?? ''}) -> ${this.#returnTypeToken.lexeme};`];
+        return [`${this.ruleName} ${this.walkerName}::${this.functionName}(${this.#allParamsToken?.lexeme ?? ''}) -> ${this.#returnTypeToken.lexeme}`];
     }
 
     getSemanticTokens() {
