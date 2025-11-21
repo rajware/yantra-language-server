@@ -13,7 +13,7 @@ const mkDir = (directoryPath) => {
 const copyFiles = () => {
     fs.copyFileSync('src/client/extension.js', 'dist/extension.js');
     fs.copyFileSync('src/server/server.js', 'dist/server.js');
-    fs.copyFileSync('src/server/YantraParser.js', 'dist/YantraParser.js');
+    fs.cpSync('src/server/parser', 'dist/parser', { recursive: true });
 }
 
 const buildDist = (mode) => {

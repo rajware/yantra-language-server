@@ -4,12 +4,13 @@ const {
   ProposedFeatures,
   Location,
   Range,
-  URI
+  URI,
+  TextDocumentSyncKind
 } = require('vscode-languageserver/node');
 
 const { TextDocument } = require('vscode-languageserver-textdocument');
 
-const { ParserStatus, YantraParser } = require('./YantraParser');
+const { ParserStatus, YantraParser } = require('./parser/yantraparser');
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
@@ -57,7 +58,7 @@ connection.onInitialize((params) => {
 
   return {
     capabilities: {
-      textDocumentSync: documents.syncKind,
+      textDocumentSync: TextDocumentSyncKind.Full,
       definitionProvider: true,
       completionProvider: {
         resolveProvider: false,
@@ -97,6 +98,10 @@ documents.onDidClose((event) => {
   connection.console.info(`Closed document ${doc.uri}`);
 });
 
+/**
+ * 
+ * @param {TextDocument} document 
+ */
 function updateDiagnostics(document) {
   let documentParser = parserCache.get(document.uri);
 
@@ -150,6 +155,7 @@ connection.onDefinition((params) => {
 });
 
 // Autocomplete
+
 connection.onCompletion((params) => {
   const { textDocument, position } = params;
   const document = documents.get(textDocument.uri);
