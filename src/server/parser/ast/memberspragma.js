@@ -114,15 +114,7 @@ class MembersPragmaNode extends PragmaNode {
      * @returns {Reference|null}
      */
     getReferenceAt(character) {
-        if (this.#walkerNameToken &&
-            this.#walkerNameToken.isCharacterInside(character)) {
-            return {
-                type: 'walker',
-                name: this.#walkerNameToken.lexeme
-            };
-        }
-
-        return null;
+        return this.getReferenceForToken(character, this.#walkerNameToken, 'walker');
     }
 
     /**
@@ -130,19 +122,11 @@ class MembersPragmaNode extends PragmaNode {
      * @returns {LexicalToken[]} - The lexical token(s) which match the reference
      */
     getLexicalTokensFor(noderef) {
-        /** @type {LexicalToken[]} */
-        const toks = [];
-        if (noderef.type !== 'walker') return toks;
-        if (!this.#walkerNameToken) return toks;
-        if (this.#walkerNameToken.lexeme !== noderef.name) return toks;
-
-        toks.push(this.#walkerNameToken);
-
-        return toks;
+        return this.getTokensForReference(noderef, this.#walkerNameToken, 'walker');
     }
 
     getFormattedLines() {
-        if(!this.#walkerNameToken) return [''];
+        if (!this.#walkerNameToken) return [''];
         // Just write out the pragma name and the walker name.
         // Code block pretty printing will take care of the
         // rest.
@@ -150,22 +134,11 @@ class MembersPragmaNode extends PragmaNode {
     }
 
     getSemanticTokens() {
-        /** @type {SemanticToken[]} */
-        const semToks = [];
-
-        const pragmaToks = super.getSemanticTokens();
-        semToks.push(...pragmaToks);
-
-        // As far as possible, ignore errors while returning
-        // semantic tokens.
-        if (this.#walkerNameToken) {
-            semToks.push({
-                range: this.#walkerNameToken.range,
-                tokenType: SemanticTokenType.Class,
-                tokenModifiers: []
-            });
-        }
-
+        const semToks = super.getSemanticTokens();
+        semToks.push(...this.createSemanticTokensFor(
+            [this.#walkerNameToken],
+            SemanticTokenType.Class
+        ));
         return semToks;
     }
 }

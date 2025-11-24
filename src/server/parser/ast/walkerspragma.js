@@ -24,6 +24,8 @@ class WalkersPragmaNode extends PragmaNode {
 
     /** @type {NodeParser} */
     parse(state) {
+        if(!this.paramsToken) return;
+        
         // Check if walkers pragma has already appeared
         if (state.walkersPragmaDefined) {
             state.addError(
@@ -42,10 +44,7 @@ class WalkersPragmaNode extends PragmaNode {
             return;
         }
 
-        if (!this.terminatorToken) {
-            state.addError(
-                'The %walkers pragma should end with a semicolon'
-            );
+        if (!this.validateTerminator(state, 'walkers')) {
             return;
         }
 

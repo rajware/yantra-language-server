@@ -42,8 +42,7 @@ class ClassNamePragmaNode extends PragmaNode {
         }
 
         // Check for terminator
-        if (!this.terminatorToken) {
-            state.addError('A %class pragma should end with a semicolon');
+        if (!this.validateTerminator(state, 'class')) {
             return;
         }
 

@@ -110,6 +110,8 @@ class FunctionPragmaNode extends PragmaNode {
      * @returns {Reference|null}
      */
     getReferenceAt(character) {
+        if (!this.paramsToken) return null;
+
         if (character > this.paramsToken.range.start.character) {
             return this.#functionDefinition?.getReferenceAt(character) ?? null;
         }
@@ -122,6 +124,8 @@ class FunctionPragmaNode extends PragmaNode {
      * @returns {Reference|ASTNode|null}
      */
     getReferenceOrNodeAt(character) {
+        if (!this.paramsToken) return null;
+        
         if (character > this.paramsToken.range.start.character) {
             return this.#functionDefinition?.getReferenceOrNodeAt(character) ?? null;
         }

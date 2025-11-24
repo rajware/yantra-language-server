@@ -45,7 +45,8 @@ const ElementPattern = {
     CppName: /^[a-zA-Z_]\w*$/d,
     SpacedCppName: /^\s*?([a-zA-Z_]\w*?)\s*$/d,
     FunctionDefinition: /^\s*?([a-z_]\w+)\s+(?:(?:([a-zA-Z_]\w+)::)?([a-zA-Z_]\w+))\s*?\((.*?)\)\s*?->\s*([^\s\(\);]+)\s*?(;)?\s*$/d,
-    LexerMode: /^\s*?([A-Za-z][A-Za-z0-9_]*?)\s*$/d
+    LexerMode: /^\s*?([A-Za-z][A-Za-z0-9_]*?)\s*$/d,
+    WalkerInterfaceDefinition: /^\s*?([a-zA-Z_]\w*?)\s+([a-zA-Z_]\w*?)\s*?$/d
 }
 
 /**

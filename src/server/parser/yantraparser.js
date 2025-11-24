@@ -20,7 +20,7 @@ const {
     CommentNode,
     PragmaNode,
     ClassNamePragmaNode,
-    WalkersPragmaNode, DefaultWalkerPragmaNode, MembersPragmaNode,
+    WalkersPragmaNode, DefaultWalkerPragmaNode, WalkerInterfacePragmaNode, MembersPragmaNode,
     FunctionPragmaNode,
     AssociativityPragmaNode,
     LexerModePragmaNode,
@@ -794,6 +794,9 @@ class YantraParser {
                 break;
             case 'default_walker':
                 pragmaNode = new DefaultWalkerPragmaNode(state);
+                break;
+            case 'walker_interface':
+                pragmaNode = new WalkerInterfacePragmaNode(state);
                 break;
             case 'members':
                 pragmaNode = new MembersPragmaNode(state);

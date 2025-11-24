@@ -25,6 +25,8 @@ class AssociativityPragmaNode extends PragmaNode {
     /** @type {NodeParser} */
     parse(state) {
         // Check parameters
+        if (!this.paramsToken) return;
+        
         const paramsMatch = this.paramsToken.matchRepeatingPattern(RepeatedElementPattern.TokenNames);
         if (!paramsMatch || paramsMatch.length === 0) {
             state.addError(

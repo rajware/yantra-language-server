@@ -10,6 +10,7 @@ const { MembersPragmaNode } = require('./memberspragma');
 const { PragmaNode, StubPragmaNode } = require('./pragmacore');
 const { RuleNode } = require('./rule');
 const { WalkersPragmaNode } = require('./walkerspragma');
+const { WalkerInterfacePragmaNode } = require('./walkerinterfacepragma');
 const { TokenNode } = require('./yantratoken');
 
 module.exports = {
@@ -24,6 +25,6 @@ module.exports = {
     MembersPragmaNode,
     PragmaNode, StubPragmaNode,
     RuleNode,
-    WalkersPragmaNode,
+    WalkersPragmaNode, WalkerInterfacePragmaNode,
     TokenNode
 };
