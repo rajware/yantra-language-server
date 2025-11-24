@@ -39,7 +39,8 @@ class GlobalState {
         //     ['walker', new Map()],
         //     ['function', new Map()],
         //     ['codeblock', new Map()],
-        //     ['lexermode', new Map()]
+        //     ['lexermode', new Map()],
+        //     ['walkerinterface', new Map()]
         // ]);
         this.#errors = errors;
         this.#definitionsMap = definitionsMap;

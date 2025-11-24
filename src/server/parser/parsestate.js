@@ -301,6 +301,16 @@ class ParseState {
     }
 
     /**
+     * Adds a multi-line error spanning a completed code block.
+     * @param {string} message 
+     * @param {ErrorSeverity} severity 
+     * @param {CodeBlockNode} codeBlock
+     */
+    addCodeBlockError(message, severity = ErrorSeverity.Error, codeBlock) {
+        this.#globalState.addErrorWithRange(message, severity, codeBlock.range);
+    }
+
+    /**
      * Adds a definition to the current line
      * @param {ASTNode} def
      */

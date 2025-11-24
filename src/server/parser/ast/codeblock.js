@@ -60,11 +60,28 @@ class CodeBlockNode extends MultilineASTNode {
             character: state.lineText.length
         };
 
-        // Push definition
-        state.addDefinition(this);
+        // Check to see if a walker interface exists for the class
+        // name. If it does, this code block should not exist.
+        const codeblockWalkerName = state.codeBlockName?.className;
+        if (codeblockWalkerName &&
+            state.lookupReference({
+                name: codeblockWalkerName,
+                type: 'walkerinterface'
+            })
+        ) {
+            state.addCodeBlockError(
+                `The walker '${codeblockWalkerName}' has an external interface defined. This inline implemntation is invalid.`,
+                ErrorSeverity.Error,
+                this
+            );
+        } else {
 
-        // Remove any forward references
-        state.removeForwardReference(this.name, this.type);
+            // Push definition
+            state.addDefinition(this);
+
+            // Remove any forward references
+            state.removeForwardReference(this.name, this.type);
+        }
 
         // Reset current code block and name
         state.resetCodeBlock();
@@ -108,7 +125,7 @@ class CodeBlockNode extends MultilineASTNode {
 }
 
 class CodeBlockNameNode extends ASTNode {
-    #classnameToken;
+    #classNameToken;
     #functionNameToken;
     #ruleDefName;
 
@@ -122,8 +139,9 @@ class CodeBlockNameNode extends ASTNode {
         // The codeblockname regexp returns
         // - [1] class (walker) name
         // - [2] function name
-        this.#classnameToken = state.lexicalTokenFromMatch(1);
+        this.#classNameToken = state.lexicalTokenFromMatch(1);
         this.#functionNameToken = state.lexicalTokenFromMatch(2);
+
         // A code block name can only appear in a rule definition
         this.#ruleDefName = state.ruleDefName;
     }
@@ -135,7 +153,7 @@ class CodeBlockNameNode extends ASTNode {
     }
 
     get className() {
-        return this.#classnameToken.lexeme;
+        return this.#classNameToken.lexeme;
     }
 
     get functionName() {
@@ -148,8 +166,8 @@ class CodeBlockNameNode extends ASTNode {
     parse(state) {
         // Validate the classname
         if (!state.lookupReference({ type: 'walker', name: this.className })) {
-            const startColumn = this.#classnameToken.range.start.character;
-            const endColumn = this.#classnameToken.range.end?.character;
+            const startColumn = this.#classNameToken.range.start.character;
+            const endColumn = this.#classNameToken.range.end?.character;
             state.addError(
                 `A walker named '${this.className}' has not been defined`,
                 ErrorSeverity.Warning,
@@ -186,8 +204,8 @@ class CodeBlockNameNode extends ASTNode {
      * @returns {Reference|null}
      */
     getReferenceAt(character) {
-        if (this.#classnameToken.isCharacterInside(character)) {
-            return { type: 'walker', name: this.#classnameToken.lexeme };
+        if (this.#classNameToken.isCharacterInside(character)) {
+            return { type: 'walker', name: this.#classNameToken.lexeme };
         }
 
         if (this.#functionNameToken.isCharacterInside(character)) {
@@ -206,8 +224,8 @@ class CodeBlockNameNode extends ASTNode {
         const refs = [];
         if (!(['walker', 'function'].includes(noderef.type))) return refs;
 
-        if (noderef.type === 'walker' && this.#classnameToken.lexeme === noderef.name) {
-            refs.push(this.#classnameToken);
+        if (noderef.type === 'walker' && this.#classNameToken.lexeme === noderef.name) {
+            refs.push(this.#classNameToken);
         }
 
         if (noderef.type === 'function' && this.name === noderef.name) {
@@ -225,9 +243,9 @@ class CodeBlockNameNode extends ASTNode {
         /** @type {SemanticToken[]} */
         const semToks = [];
 
-        if (this.#classnameToken) {
+        if (this.#classNameToken) {
             semToks.push({
-                range: this.#classnameToken.range,
+                range: this.#classNameToken.range,
                 tokenType: SemanticTokenType.Class,
                 tokenModifiers: []
             });

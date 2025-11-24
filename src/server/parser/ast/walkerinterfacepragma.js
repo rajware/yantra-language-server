@@ -22,6 +22,15 @@ class WalkerInterfacePragmaNode extends PragmaNode {
         super(state);
     }
 
+    get name() {
+        if (!this.#walkerNameToken) return '';
+        return this.#walkerNameToken.lexeme;
+    }
+
+    get type() {
+        return 'walkerinterface';
+    }
+
     /**
      * @type {NodeParser}
      */
@@ -72,11 +81,24 @@ class WalkerInterfacePragmaNode extends PragmaNode {
             return;
         }
 
+        // Add an error if the walker inteface has already been defined.
+        /** @type {Reference} */
+        const interfaceReference = { name: walkerName, type: 'walkerinterface' };
+        if(state.lookupReference(interfaceReference)) {
+            state.addError(
+                `An interface has already been defined for the walker '${walkerName}'`,
+                ErrorSeverity.Error
+            );
+            return;
+        }
+
         // Check for semicolon
         if (!this.validateTerminator(state, 'walker_interface')) {
             return;
         }
 
+        // Add definition
+        state.addDefinition(this);
     }
 
     /**

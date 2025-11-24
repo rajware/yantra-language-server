@@ -1,5 +1,6 @@
 // yantra.d.ts
 
+import { CodeBlockNode } from "./ast/codeblock";
 import { LexicalToken } from "./lexicaltoken";
 
 // Basic structural types
@@ -49,7 +50,7 @@ type YantraError = {
 }
 
 interface Reference {
-  type: 'rule' | 'token' | 'function' | 'walker' | 'lexermode';
+  type: 'rule' | 'token' | 'function' | 'walker' | 'lexermode' | 'walkerinterface';
   name: string;
 }
 
@@ -226,6 +227,7 @@ interface IParseState {
   ): void;
 
   addRuleDefCodeBlockExpectedError(): void;
+  addCodeBlockError(message: string, severity?: ErrorSeverity, codeBlock: CodeBlockNode): void;
 
   addDefinition(def: any): void; // ASTNode
   lookupReference(ref: Reference): boolean;

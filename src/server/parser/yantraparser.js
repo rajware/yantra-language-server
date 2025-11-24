@@ -155,7 +155,8 @@ class YantraParser {
             ['walker', new Map()],
             ['function', new Map()],
             ['codeblock', new Map()],
-            ['lexermode', new Map()]
+            ['lexermode', new Map()],
+            ['walkerinterface', new Map()]
         ]);
 
         this.#astNodes = [];
@@ -201,7 +202,8 @@ class YantraParser {
             ['walker', new Map()],
             ['function', new Map()],
             ['codeblock', new Map()],
-            ['lexermode', new Map()]
+            ['lexermode', new Map()],
+            ['walkerinterface', new Map()]
         ]);
         this.#astNodes = [];
         this.#status = ParserStatus.Initialized;
@@ -303,7 +305,12 @@ class YantraParser {
         // % → pragma suggestions
         if (trimmed.startsWith('%')) {
 
-            const pragmaNames = ['class', 'walkers', 'default_walker', 'members', 'left', 'right', 'token', 'function'];
+            const pragmaNames = [
+                'class',
+                'walkers', 'default_walker', 'walker_interface', 'members',
+                'left', 'right', 'token',
+                'function'
+            ];
 
             const names = this.#namesToCompletions(
                 pragmaNames,

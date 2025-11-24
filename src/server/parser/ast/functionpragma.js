@@ -43,12 +43,11 @@ class FunctionPragmaNode extends PragmaNode {
             return;
         }
 
-        //const funcdef = new FunctionDefinitionNode(paramsMatch, state.line, this.paramsToken.range.start.character, state.defaultWalker);
         const funcdef = new FunctionDefinitionNode(state, paramsMatch, this.paramsToken.range.start.character);
         // Forgiving
         this.#functionDefinition = funcdef;
 
-        // Look up classname
+        // Look up walker name
         if (funcdef.walkerNameToken) {
             if (!state.lookupReference({ type: 'walker', name: funcdef.walkerName })) {
                 const startColumn = funcdef.walkerNameToken.range.start.character;
@@ -83,7 +82,7 @@ class FunctionPragmaNode extends PragmaNode {
         if (!this.terminatorToken) {
             state.addError(
                 'The %function pragma should end with a semicolon'
-            )
+            );
             return;
         }
 
@@ -96,6 +95,15 @@ class FunctionPragmaNode extends PragmaNode {
             'rule',
             funcdef.ruleNameToken.range
         );
+
+        // If a walker interface exists for the referenced walker,
+        // no need to add a forward reference to a code block.
+        if (state.lookupReference({
+            name: funcdef.walkerName,
+            type: 'walkerinterface'
+        })) {
+            return;
+        };
 
         // Add forward reference to code block
         state.addForwardReference(
@@ -125,7 +133,7 @@ class FunctionPragmaNode extends PragmaNode {
      */
     getReferenceOrNodeAt(character) {
         if (!this.paramsToken) return null;
-        
+
         if (character > this.paramsToken.range.start.character) {
             return this.#functionDefinition?.getReferenceOrNodeAt(character) ?? null;
         }
