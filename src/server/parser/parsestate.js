@@ -177,6 +177,14 @@ class ParseState {
     }
 
     /**
+     * @type {any}
+     * @readonly
+     */
+    get currentRule() {
+        return this.#currentRule;
+    }
+
+    /**
      * Start a new line, and reset per-line properties
      * @param {Number} line 
      * @param {string} lineText 
@@ -344,6 +352,34 @@ class ParseState {
      */
     removeForwardReference(name, type) {
         this.#globalState.removeForwardReference(name, type);
+    }
+
+    /**
+     * Gets the count of existing definitions for a rule name.
+     * @param {string} ruleName
+     * @returns {number}
+     */
+    getRuleDefinitionCount(ruleName) {
+        return this.#globalState.getRuleDefinitionCount(ruleName);
+    }
+
+    /**
+     * Gets all definitions for a given type and name.
+     * @param {string} type
+     * @param {string} name
+     * @returns {any[]}
+     */
+    getDefinitions(type, name) {
+        return this.#globalState.getDefinitions(type, name);
+    }
+
+    /**
+     * Gets all functions defined for a specific rule name.
+     * @param {string} ruleName
+     * @returns {any[]}
+     */
+    getFunctionsForRule(ruleName) {
+        return this.#globalState.getFunctionsForRule(ruleName);
     }
 
     /**

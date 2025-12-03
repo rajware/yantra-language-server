@@ -97,7 +97,7 @@ class FunctionPragmaNode extends PragmaNode {
         );
 
         // If a walker interface exists for the referenced walker,
-        // no need to add a forward reference to a code block.
+        // no need to add forward references to code blocks.
         if (state.lookupReference({
             name: funcdef.walkerName,
             type: 'walkerinterface'
@@ -105,12 +105,29 @@ class FunctionPragmaNode extends PragmaNode {
             return;
         };
 
-        // Add forward reference to code block
-        state.addForwardReference(
-            funcdef.name,
-            'codeblock',
-            funcdef.functionNameToken.range
-        );
+        // Add forward references to code blocks for ALL existing rule definitions
+        // Each rule definition needs its own code block implementation
+        const ruleDefs = state.getDefinitions('rule', funcdef.ruleName);
+
+        if (ruleDefs.length === 0) {
+            // No rule definitions exist yet - add a single forward reference
+            // using the base rule name
+            state.addForwardReference(
+                funcdef.name,
+                'codeblock',
+                funcdef.functionNameToken.range
+            );
+        } else {
+            // Create forward references for each existing rule definition
+            ruleDefs.forEach((ruleDef) => {
+                const codeBlockName = `${ruleDef.internalName}::${funcdef.walkerName}::${funcdef.functionName}`;
+                state.addForwardReference(
+                    codeBlockName,
+                    'codeblock',
+                    funcdef.functionNameToken.range
+                );
+            });
+        }
     }
 
     /**

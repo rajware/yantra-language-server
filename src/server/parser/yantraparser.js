@@ -593,6 +593,18 @@ class YantraParser {
     }
 
     /**
+     * Internal method for testing purposes.
+     * Provides access to internal state.
+     * @returns {{definitionsMap: Map<string, Map<string, YantraDefinition[]>>, globalState: GlobalState}}
+     */
+    _getInternalState() {
+        return {
+            definitionsMap: this.#definitionsMap,
+            globalState: this.#globalState
+        };
+    }
+
+    /**
      * Parses the input as a Yantra document.
      * @param {string} inputText 
      * @returns {void}

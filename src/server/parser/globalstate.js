@@ -158,6 +158,55 @@ class GlobalState {
         }
         return [];
     }
+
+    /**
+     * Gets the count of existing definitions for a rule name.
+     * Used to calculate internal rule names with suffixes.
+     * @param {string} ruleName
+     * @returns {number}
+     */
+    getRuleDefinitionCount(ruleName) {
+        const defMap = this.#definitionsMap.get('rule');
+        if (!defMap || !defMap.has(ruleName)) {
+            return 0;
+        }
+        return defMap.get(ruleName).length;
+    }
+
+    /**
+     * Gets all definitions for a given type and name.
+     * @param {string} type
+     * @param {string} name
+     * @returns {YantraDefinition[]}
+     */
+    getDefinitions(type, name) {
+        const defMap = this.#definitionsMap.get(type);
+        if (!defMap || !defMap.has(name)) {
+            return [];
+        }
+        return defMap.get(name) || [];
+    }
+
+    /**
+     * Gets all functions defined for a specific rule name.
+     * @param {string} ruleName
+     * @returns {YantraDefinition[]}
+     */
+    getFunctionsForRule(ruleName) {
+        const funcMap = this.#definitionsMap.get('function');
+        if (!funcMap) return [];
+
+        const functions = [];
+        funcMap.forEach((defs) => {
+            defs.forEach((def) => {
+                // Function names are in format: ruleName::walkerName::functionName
+                if (def.name.startsWith(ruleName + '::')) {
+                    functions.push(def);
+                }
+            });
+        });
+        return functions;
+    }
 }
 
 module.exports = {

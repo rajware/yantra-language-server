@@ -6,8 +6,7 @@
  */
 
 const { ASTNode } = require('./astcore');
-const { LexicalToken } = require('../lexicaltoken');
-const { RepeatedElementPattern, SemanticTokenType, ErrorSeverity } = require('../enums');
+const { SemanticTokenType } = require('../enums');
 
 
 class CommentNode extends ASTNode {
@@ -32,7 +31,7 @@ class CommentNode extends ASTNode {
      * @returns {string[]}
      */
     getFormattedLines() {
-        if(!this.#lineText) return [''];
+        if (!this.#lineText) return [''];
         return [this.#lineText.replace(/^(\s*?)\/\/([^\s#])/, "$1// $2")];
     }
 

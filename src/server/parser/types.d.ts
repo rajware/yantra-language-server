@@ -194,6 +194,8 @@ interface IGlobalState {
     name: string,
     type: string
   ): void;
+
+  getRuleDefinitionCount(ruleName: string): number;
 }
 
 // Parse state contract
@@ -207,6 +209,7 @@ interface IParseState {
   readonly ruleDefName: string;
   readonly inCodeBlock: boolean;
   readonly currentCodeBlock: any; // CodeBlockNode
+  readonly currentRule: any; // RuleNode
   className?: string;
   walkersPragmaDefined: boolean;
   defaultWalker: string;
@@ -245,8 +248,10 @@ interface IParseState {
   resetRuleDef(): void;
 
   fullLineRange(): range;
-  lexicalTokenFromMatch(matchIndex: number): LexicalToken|null;
+  lexicalTokenFromMatch(matchIndex: number): LexicalToken | null;
   lexicalTokenFromSubmatch(submatches: RegExpMatchArray, matchIndex: number, characterOffset: number);
+
+  getRuleDefinitionCount(ruleName: string): number;
 }
 
 /**

@@ -33,11 +33,13 @@ class CodeBlockNode extends MultilineASTNode {
         });
 
         // Code block names are a combination of the following elements:
-        // - The rule definition name if part of a rule definition
+        // - The rule definition's INTERNAL name if part of a rule definition
         // - The walker name with which this code block is associated
         // - The function name for this code block
         // Separated by ::
-        const codeBlockName = `${state.inRuleDef ? state.ruleDefName + '::' : ''}${state.codeBlockName?.className}::${state.codeBlockName?.functionName}`;
+        // Use internal name to ensure each rule definition gets unique code blocks
+        const ruleInternalName = state.currentRule?.internalName ?? state.ruleDefName;
+        const codeBlockName = `${state.inRuleDef ? ruleInternalName + '::' : ''}${state.codeBlockName?.className}::${state.codeBlockName?.functionName}`;
         this.#name = codeBlockName;
 
         this.#lines = [];

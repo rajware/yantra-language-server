@@ -44,6 +44,7 @@ const isYantraRuleName = (word) => {
 
 class RuleNode extends MultilineASTNode {
     #nameToken;
+    #internalName;
     #aliasToken;
     #assignOpToken;
     #definitionToken;
@@ -83,6 +84,7 @@ class RuleNode extends MultilineASTNode {
         });
 
         this.#nameToken = name;
+        this.#internalName = this.#calculateInternalName(state);
         this.#aliasToken = alias;
         this.#assignOpToken = assignOp;
         this.#definitionToken = defininition;
@@ -96,6 +98,28 @@ class RuleNode extends MultilineASTNode {
 
     get name() {
         return this.#nameToken.lexeme;
+    }
+
+    get internalName() {
+        return this.#internalName;
+    }
+
+    /**
+     * Calculates the internal name for this rule definition.
+     * First definition uses the base name, subsequent definitions
+     * append _1, _2, etc.
+     * @param {IParseState} state
+     * @returns {string}
+     */
+    #calculateInternalName(state) {
+        const baseName = this.#nameToken.lexeme;
+        const existingDefs = state.getRuleDefinitionCount(baseName);
+
+        if (existingDefs === 0) {
+            return baseName;  // First definition
+        } else {
+            return `${baseName}_${existingDefs}`;  // Second+ definitions
+        }
     }
 
     /** @type {NodeParser} */
@@ -234,6 +258,32 @@ class RuleNode extends MultilineASTNode {
 
         // Clear any forward references
         state.removeForwardReference(this.name, 'rule');
+
+        // For each function defined for this rule, create a forward reference
+        // to the corresponding code block (unless a walker interface exists)
+        const functions = state.getFunctionsForRule(this.name);
+        functions.forEach((funcDef) => {
+            // Extract walker name from function name (format: ruleName::walkerName::functionName)
+            const parts = funcDef.name.split('::');
+            const walkerName = parts[1];
+            const functionName = parts[2];
+
+            // Skip if walker has an interface
+            if (state.lookupReference({
+                name: walkerName,
+                type: 'walkerinterface'
+            })) {
+                return;
+            }
+
+            // Create forward reference using internal rule name
+            const codeBlockName = `${this.internalName}::${walkerName}::${functionName}`;
+            state.addForwardReference(
+                codeBlockName,
+                'codeblock',
+                this.#nameToken.range
+            );
+        });
     }
 
     /**
