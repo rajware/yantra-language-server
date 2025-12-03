@@ -5,6 +5,7 @@ const { CodeBlockNode, CodeBlockNameNode } = require('./codeblock');
 const { CommentNode } = require('./comment');
 const { DefaultWalkerPragmaNode } = require('./defaultwalkerspragma');
 const { FunctionPragmaNode } = require('./functionpragma');
+const { LexerIncludePragmaNode } = require('./lexerincludepragma');
 const { LexerModePragmaNode } = require('./lexermodepragma');
 const { MembersPragmaNode } = require('./memberspragma');
 const { PragmaNode, StubPragmaNode } = require('./pragmacore');
@@ -21,6 +22,7 @@ module.exports = {
     CommentNode,
     DefaultWalkerPragmaNode,
     FunctionPragmaNode,
+    LexerIncludePragmaNode,
     LexerModePragmaNode,
     MembersPragmaNode,
     PragmaNode, StubPragmaNode,

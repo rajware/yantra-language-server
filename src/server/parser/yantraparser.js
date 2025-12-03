@@ -23,12 +23,12 @@ const {
     WalkersPragmaNode, DefaultWalkerPragmaNode, WalkerInterfacePragmaNode, MembersPragmaNode,
     FunctionPragmaNode,
     AssociativityPragmaNode,
-    LexerModePragmaNode,
+    LexerIncludePragmaNode, LexerModePragmaNode,
     StubPragmaNode,
     RuleNode,
     TokenNode,
     CodeBlockNode, CodeBlockNameNode
-} = require('./ast/nodetypes.js');
+} = require('./ast/nodetypes');
 
 /**
  * A line parser function
@@ -309,7 +309,8 @@ class YantraParser {
                 'class',
                 'walkers', 'default_walker', 'walker_interface', 'members',
                 'left', 'right', 'token',
-                'function'
+                'function',
+                'lexer_include', 'lexer_mode'
             ];
 
             const names = this.#namesToCompletions(
@@ -595,7 +596,7 @@ class YantraParser {
     /**
      * Internal method for testing purposes.
      * Provides access to internal state.
-     * @returns {{definitionsMap: Map<string, Map<string, YantraDefinition[]>>, globalState: GlobalState}}
+     * @returns {{definitionsMap: Map<string, Map<string, YantraDefinition[]>>, globalState: GlobalState|undefined}}
      */
     _getInternalState() {
         return {
@@ -827,6 +828,9 @@ class YantraParser {
                 break;
             case 'function':
                 pragmaNode = new FunctionPragmaNode(state);
+                break;
+            case 'lexer_include':
+                pragmaNode = new LexerIncludePragmaNode(state);
                 break;
             case 'lexer_mode':
                 pragmaNode = new LexerModePragmaNode(state);
