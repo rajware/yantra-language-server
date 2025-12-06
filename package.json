@@ -2,7 +2,7 @@
   "name": "yantra-language-server",
   "displayName": "Yantra Language Server",
   "description": "Language Server Protocol (LSP) implementation for the Yantra grammar language",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "publisher": "rajware",
   "license": "MIT",
   "icon": "icon.png",
@@ -74,7 +74,7 @@
   "scripts": {
     "clean": "node scripts/build.js clean",
     "build-debug": "node scripts/build.js debug",
-    "build-package": "node scripts/build.js package && vsce package -o out/ --readme-path assets/marketplace-README.md"
+    "build-package": "node scripts/build.js package rollup && vsce package -o out/ --readme-path assets/marketplace-README.md"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1",
@@ -82,6 +82,11 @@
     "vscode-languageserver-textdocument": "^1.0.12"
   },
   "devDependencies": {
-    "esbuild": "^0.25.11"
+    "@rollup/plugin-commonjs": "^29.0.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.25.11",
+    "rollup": "^4.53.3"
   }
 }
