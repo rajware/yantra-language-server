@@ -590,6 +590,17 @@ class YantraParser {
             }
         });
 
+        // CRITICAL: Sort tokens by position (line, then character)
+        // This is required for LSP delta encoding in the language server.
+        // Without sorting, out-of-order tokens cause incorrect delta values,
+        // leading to wrong syntax coloring.
+        sTokens.sort((a, b) => {
+            if (a.range.start.line !== b.range.start.line) {
+                return a.range.start.line - b.range.start.line;
+            }
+            return a.range.start.character - b.range.start.character;
+        });
+
         return sTokens;
     }
 
