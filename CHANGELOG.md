@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [0.3.1] - 2025-12-19
+
+### Fixed
+
+- Bug which prevented basic recognition of namespace, pch_header,
+  std_header, hdr_header, src_header, class_member, encoding, 
+  check_unused_tokens, auto_resolve, warn_resolve, walker_output, 
+  walker_traversal, start and fallback pragmas
+
 ## [0.3.0] - 2025-12-04
 
 ### Changed
