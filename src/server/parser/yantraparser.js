@@ -861,6 +861,7 @@ class YantraParser {
             case 'start':
             case 'fallback':
                 pragmaNode = new StubPragmaNode(state);
+                break;
             default:
                 pragmaNode = undefined;
         }
