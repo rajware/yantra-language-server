@@ -8,6 +8,7 @@ const { FunctionPragmaNode } = require('./functionpragma');
 const { LexerIncludePragmaNode } = require('./lexerincludepragma');
 const { LexerModePragmaNode } = require('./lexermodepragma');
 const { MembersPragmaNode } = require('./memberspragma');
+const { StartPragmaNode } = require('./startpragma');
 const { PragmaNode, StubPragmaNode } = require('./pragmacore');
 const { RuleNode } = require('./rule');
 const { WalkersPragmaNode } = require('./walkerspragma');
@@ -25,6 +26,7 @@ module.exports = {
     LexerIncludePragmaNode,
     LexerModePragmaNode,
     MembersPragmaNode,
+    StartPragmaNode,
     PragmaNode, StubPragmaNode,
     RuleNode,
     WalkersPragmaNode, WalkerInterfacePragmaNode,

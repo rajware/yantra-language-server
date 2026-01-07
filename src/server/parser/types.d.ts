@@ -174,6 +174,7 @@ interface IGlobalState {
   className: string;
   walkersPragmaDefined: boolean;
   defaultWalkerName: string;
+  startRuleName: string;
 
   addErrorWithRange(
     message: string,
@@ -195,6 +196,8 @@ interface IGlobalState {
     type: string
   ): void;
 
+  getDefinitions(type: string, name: string): YantraDefinition[];
+  getFunctionsForRule(ruleName: string): YantraDefinition[];
   getRuleDefinitionCount(ruleName: string): number;
 }
 
@@ -247,9 +250,11 @@ interface IParseState {
   startMultilineRule(rule: any): void; // RuleNode
   resetRuleDef(): void;
 
+  setStartRuleName(name: string): void;
+
   fullLineRange(): range;
   lexicalTokenFromMatch(matchIndex: number): LexicalToken | null;
-  lexicalTokenFromSubmatch(submatches: RegExpMatchArray, matchIndex: number, characterOffset: number);
+  lexicalTokenFromSubmatch(submatches: RegExpMatchArray, matchIndex: number, characterOffset: number): LexicalToken | null;
 
   getRuleDefinitionCount(ruleName: string): number;
 }

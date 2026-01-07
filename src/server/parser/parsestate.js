@@ -438,6 +438,14 @@ class ParseState {
         this.#currentRule?.end(this);
         this.#currentRule = undefined;
     }
+
+    /**
+     * Set the name of the start symbol (default 'start').
+     * @param {string} name 
+     */
+    setStartRuleName(name) {
+        this.#globalState.startRuleName = name;
+    }
 }
 
 

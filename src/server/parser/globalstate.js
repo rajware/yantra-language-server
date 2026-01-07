@@ -25,6 +25,7 @@ class GlobalState {
     className = '';
     walkersPragmaDefined = false;
     defaultWalkerName = '';
+    startRuleName = 'start';
 
     /**
      * 
@@ -32,16 +33,6 @@ class GlobalState {
      * @param {Map<string, Map<string, YantraDefinition[]>>} definitionsMap 
      */
     constructor(errors, definitionsMap) {
-        // this.#errors = [];
-        // this.#definitionsMap = new Map([
-        //     ['token', new Map()],
-        //     ['rule', new Map()],
-        //     ['walker', new Map()],
-        //     ['function', new Map()],
-        //     ['codeblock', new Map()],
-        //     ['lexermode', new Map()],
-        //     ['walkerinterface', new Map()]
-        // ]);
         this.#errors = errors;
         this.#definitionsMap = definitionsMap;
         this.#forwardReferences = [];
@@ -170,7 +161,7 @@ class GlobalState {
         if (!defMap || !defMap.has(ruleName)) {
             return 0;
         }
-        return defMap.get(ruleName).length;
+        return defMap.get(ruleName)?.length ?? 0;
     }
 
     /**
@@ -196,6 +187,7 @@ class GlobalState {
         const funcMap = this.#definitionsMap.get('function');
         if (!funcMap) return [];
 
+        /** @type {YantraDefinition[]} */
         const functions = [];
         funcMap.forEach((defs) => {
             defs.forEach((def) => {

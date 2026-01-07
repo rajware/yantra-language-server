@@ -24,6 +24,7 @@ const {
     FunctionPragmaNode,
     AssociativityPragmaNode,
     LexerIncludePragmaNode, LexerModePragmaNode,
+    StartPragmaNode,
     StubPragmaNode,
     RuleNode,
     TokenNode,
@@ -310,7 +311,8 @@ class YantraParser {
                 'walkers', 'default_walker', 'walker_interface', 'members',
                 'left', 'right', 'token',
                 'function',
-                'lexer_include', 'lexer_mode'
+                'lexer_include', 'lexer_mode',
+                'start'
             ];
 
             const names = this.#namesToCompletions(
@@ -637,16 +639,6 @@ class YantraParser {
      */
     #parseLines(lines) {
         this.#globalState = new GlobalState(this.#errors, this.#definitionsMap);
-        // let state = new ParseState({
-        //     className: undefined,
-        //     walkersPragmaDefined: false,
-        //     defaultWalkerName: undefined,
-        //     addErrorWithRange: this.#addErrorWithRange.bind(this),
-        //     addDefinition: this.#addDefinition.bind(this),
-        //     lookupReference: this.#lookupReference.bind(this),
-        //     addForwardReference: this.#addForwardReference.bind(this),
-        //     removeForwardReference: this.#removeForwardReference.bind(this)
-        // });
         let state = new ParseState(this.#globalState);
 
         for (let i = 0; i < lines.length; i++) {
@@ -753,6 +745,21 @@ class YantraParser {
 
         // Clear forward references
         this.#globalState.clearForwardReferences();
+
+        // Global checks
+
+        // Check for presence of start symbol
+        const startRuleName = this.#globalState.startRuleName;
+        if (!this.#definitionsMap.get('rule')?.has(startRuleName)) {
+            this.#globalState.addErrorWithRange(
+                `No start symbol: a rule named '${startRuleName}' has not been defined`,
+                ErrorSeverity.Error,
+                {
+                    start: { line: 0, character: 0 },
+                    end: { line: 0, character: 0 }
+                }
+            );
+        }
     }
 
     /**
@@ -846,6 +853,9 @@ class YantraParser {
             case 'lexer_mode':
                 pragmaNode = new LexerModePragmaNode(state);
                 break;
+            case 'start':
+                pragmaNode = new StartPragmaNode(state);
+                break;
             case 'namespace':
             case 'pch_header':
             case 'std_header':
@@ -858,7 +868,6 @@ class YantraParser {
             case 'warn_resolve':
             case 'walker_output':
             case 'walker_traversal':
-            case 'start':
             case 'fallback':
                 pragmaNode = new StubPragmaNode(state);
                 break;

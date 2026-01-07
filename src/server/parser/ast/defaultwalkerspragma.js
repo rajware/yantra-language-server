@@ -47,6 +47,14 @@ class DefaultWalkerPragmaNode extends PragmaNode {
             1,
             paramsToken.range.start.character
         );
+
+        if(!walkerNameToken) {
+            state.addError(
+                'The %default_walker pragma expects a single valid walker name as parameter'
+            );
+            return;
+        }
+
         // Forgiving
         this.#walkerReferenceToken = walkerNameToken;
 
